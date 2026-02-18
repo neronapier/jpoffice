@@ -1,0 +1,459 @@
+import type {
+	JPBlockNode,
+	JPDocumentMetadata,
+	JPFooter,
+	JPHeader,
+	JPHeaderFooterRef,
+	JPHeaderFooterType,
+	JPInlineNode,
+	JPOrientation,
+	JPSection,
+	JPSectionColumns,
+	JPSectionProperties,
+} from '@jpoffice/model';
+import {
+	DEFAULT_SECTION_PROPERTIES,
+	createBookmarkEnd,
+	createBookmarkStart,
+	createFooter,
+	createHeader,
+	createHyperlink,
+	createParagraph,
+	type createRun,
+	createSection,
+	generateId,
+} from '@jpoffice/model';
+import { NS } from '../xml/namespaces';
+import { attrNS, getDirectChildren, getFirstChild, textContent } from '../xml/xml-parser';
+import type { DocxPackage } from './docx-reader';
+import { mimeFromExtension, parseDrawing } from './drawing-parser';
+import type { RelationshipMap } from './relationships-parser';
+import { resolveTarget } from './relationships-parser';
+import { parseParagraphProperties, parseRunWithBreaks } from './run-parser';
+import type { MediaBag } from './table-parser';
+import { parseTable } from './table-parser';
+
+/** Result of parsing the document body. */
+export interface DocumentParseResult {
+	readonly sections: JPSection[];
+	readonly headers: Map<string, JPHeader>;
+	readonly footers: Map<string, JPFooter>;
+	readonly media: MediaBag;
+	readonly metadata: JPDocumentMetadata;
+}
+
+/** Parse word/document.xml and related parts into document model pieces. */
+export function parseDocument(pkg: DocxPackage, docRels: RelationshipMap): DocumentParseResult {
+	const headers = new Map<string, JPHeader>();
+	const footers = new Map<string, JPFooter>();
+	const mediaBag: MediaBag = new Map();
+
+	// Pre-extract media files
+	extractMedia(pkg, docRels, mediaBag);
+
+	const docXml = pkg.xml.get('word/document.xml');
+	if (!docXml) {
+		return {
+			sections: [createSection(generateId(), [], DEFAULT_SECTION_PROPERTIES)],
+			headers,
+			footers,
+			media: mediaBag,
+			metadata: parseMetadata(pkg),
+		};
+	}
+
+	const root = docXml.documentElement;
+	const body = getFirstChild(root, NS.w, 'body');
+	if (!body) {
+		return {
+			sections: [createSection(generateId(), [], DEFAULT_SECTION_PROPERTIES)],
+			headers,
+			footers,
+			media: mediaBag,
+			metadata: parseMetadata(pkg),
+		};
+	}
+
+	// Parse body children, splitting into sections
+	const sections = parseBody(body, pkg, docRels, mediaBag, headers, footers);
+
+	return {
+		sections,
+		headers,
+		footers,
+		media: mediaBag,
+		metadata: parseMetadata(pkg),
+	};
+}
+
+// ─── Body Parsing ──────────────────────────────────────────────────────────
+
+function parseBody(
+	body: Element,
+	pkg: DocxPackage,
+	docRels: RelationshipMap,
+	mediaBag: MediaBag,
+	headers: Map<string, JPHeader>,
+	footers: Map<string, JPFooter>,
+): JPSection[] {
+	const sections: JPSection[] = [];
+	let currentBlocks: JPBlockNode[] = [];
+
+	const children = body.childNodes;
+	for (let i = 0; i < children.length; i++) {
+		const child = children[i];
+		if (child.nodeType !== 1) continue;
+		const el = child as Element;
+		if (el.namespaceURI !== NS.w) continue;
+
+		if (el.localName === 'p') {
+			const pPr = getFirstChild(el, NS.w, 'pPr');
+			const sectPr = pPr ? getFirstChild(pPr, NS.w, 'sectPr') : null;
+
+			const paragraph = parseParagraphElement(el, docRels, mediaBag);
+			currentBlocks.push(paragraph);
+
+			// Section boundary: sectPr in last paragraph's pPr
+			if (sectPr) {
+				const props = parseSectionProperties(sectPr, pkg, docRels, headers, footers);
+				sections.push(createSection(generateId(), currentBlocks, props));
+				currentBlocks = [];
+			}
+		} else if (el.localName === 'tbl') {
+			const table = parseTable(el, docRels, mediaBag, parseParagraphElement);
+			currentBlocks.push(table);
+		} else if (el.localName === 'sectPr') {
+			// Final section properties at body level
+			const props = parseSectionProperties(el, pkg, docRels, headers, footers);
+			sections.push(createSection(generateId(), currentBlocks, props));
+			currentBlocks = [];
+		}
+	}
+
+	// If there are remaining blocks without a final sectPr
+	if (currentBlocks.length > 0) {
+		sections.push(createSection(generateId(), currentBlocks, DEFAULT_SECTION_PROPERTIES));
+	}
+
+	// Ensure at least one section
+	if (sections.length === 0) {
+		sections.push(createSection(generateId(), [], DEFAULT_SECTION_PROPERTIES));
+	}
+
+	return sections;
+}
+
+// ─── Paragraph Parsing ─────────────────────────────────────────────────────
+
+function parseParagraphElement(
+	el: Element,
+	rels: RelationshipMap,
+	mediaBag: MediaBag,
+): ReturnType<typeof createParagraph> {
+	const pPr = getFirstChild(el, NS.w, 'pPr');
+	const properties = pPr ? parseParagraphProperties(pPr) : {};
+
+	const inlines: JPInlineNode[] = [];
+
+	const children = el.childNodes;
+	for (let i = 0; i < children.length; i++) {
+		const child = children[i];
+		if (child.nodeType !== 1) continue;
+		const ce = child as Element;
+
+		if (ce.namespaceURI === NS.w) {
+			switch (ce.localName) {
+				case 'r': {
+					const nodes = parseRunWithBreaks(ce);
+					for (const node of nodes) inlines.push(node);
+					break;
+				}
+				case 'hyperlink': {
+					const hyperlink = parseHyperlink(ce, rels);
+					if (hyperlink) inlines.push(hyperlink);
+					break;
+				}
+				case 'bookmarkStart': {
+					const bmId = attrNS(ce, NS.w, 'id') || '0';
+					const bmName = attrNS(ce, NS.w, 'name') || '';
+					inlines.push(createBookmarkStart(generateId(), bmId, bmName));
+					break;
+				}
+				case 'bookmarkEnd': {
+					const bmId = attrNS(ce, NS.w, 'id') || '0';
+					inlines.push(createBookmarkEnd(generateId(), bmId));
+					break;
+				}
+			}
+		}
+
+		// Handle w:drawing inside runs (some docs have it directly in paragraph)
+		if (ce.namespaceURI === NS.w && ce.localName === 'r') {
+			const drawingEl = getFirstChild(ce, NS.w, 'drawing');
+			if (drawingEl) {
+				const drawing = parseDrawing(drawingEl, rels, mediaBag);
+				if (drawing) inlines.push(drawing);
+			}
+		}
+
+		// Handle mc:AlternateContent
+		if (ce.namespaceURI === NS.mc && ce.localName === 'AlternateContent') {
+			const fallback = getFirstChild(ce, NS.mc, 'Fallback');
+			if (fallback) {
+				// Parse fallback content as if it were paragraph children
+				const fbChildren = fallback.childNodes;
+				for (let j = 0; j < fbChildren.length; j++) {
+					const fb = fbChildren[j];
+					if (fb.nodeType !== 1) continue;
+					const fbe = fb as Element;
+					if (fbe.namespaceURI === NS.w && fbe.localName === 'r') {
+						const nodes = parseRunWithBreaks(fbe);
+						for (const node of nodes) inlines.push(node);
+					}
+				}
+			}
+		}
+	}
+
+	return createParagraph(generateId(), inlines, properties);
+}
+
+// ─── Hyperlink Parsing ─────────────────────────────────────────────────────
+
+function parseHyperlink(
+	el: Element,
+	rels: RelationshipMap,
+): ReturnType<typeof createHyperlink> | null {
+	const rId = attrNS(el, NS.r, 'id');
+	const anchor = attrNS(el, NS.w, 'anchor');
+	const tooltip = attrNS(el, NS.w, 'tooltip');
+
+	let href = '';
+	if (rId) {
+		const rel = rels.get(rId);
+		if (rel) href = rel.target;
+	} else if (anchor) {
+		href = `#${anchor}`;
+	}
+
+	// Parse runs inside the hyperlink
+	const runs: ReturnType<typeof createRun>[] = [];
+	const children = el.childNodes;
+	for (let i = 0; i < children.length; i++) {
+		const child = children[i];
+		if (child.nodeType !== 1) continue;
+		const ce = child as Element;
+		if (ce.namespaceURI === NS.w && ce.localName === 'r') {
+			const nodes = parseRunWithBreaks(ce);
+			for (const node of nodes) {
+				if (node.type === 'run') runs.push(node as ReturnType<typeof createRun>);
+			}
+		}
+	}
+
+	if (runs.length === 0) return null;
+
+	return createHyperlink(generateId(), runs, href, tooltip ?? undefined);
+}
+
+// ─── Section Properties ────────────────────────────────────────────────────
+
+function parseSectionProperties(
+	el: Element,
+	pkg: DocxPackage,
+	docRels: RelationshipMap,
+	headers: Map<string, JPHeader>,
+	footers: Map<string, JPFooter>,
+): JPSectionProperties {
+	const pgSz = getFirstChild(el, NS.w, 'pgSz');
+	const pgMar = getFirstChild(el, NS.w, 'pgMar');
+
+	const width = pgSz ? intOrDefault(attrNS(pgSz, NS.w, 'w'), 11906) : 11906;
+	const height = pgSz ? intOrDefault(attrNS(pgSz, NS.w, 'h'), 16838) : 16838;
+	const orient = pgSz ? attrNS(pgSz, NS.w, 'orient') : null;
+	const orientation: JPOrientation = orient === 'landscape' ? 'landscape' : 'portrait';
+
+	const margins = {
+		top: pgMar ? intOrDefault(attrNS(pgMar, NS.w, 'top'), 1440) : 1440,
+		right: pgMar
+			? intOrDefault(attrNS(pgMar, NS.w, 'right') ?? attrNS(pgMar, NS.w, 'end'), 1440)
+			: 1440,
+		bottom: pgMar ? intOrDefault(attrNS(pgMar, NS.w, 'bottom'), 1440) : 1440,
+		left: pgMar
+			? intOrDefault(attrNS(pgMar, NS.w, 'left') ?? attrNS(pgMar, NS.w, 'start'), 1440)
+			: 1440,
+		header: pgMar ? intOrDefault(attrNS(pgMar, NS.w, 'header'), 720) : 720,
+		footer: pgMar ? intOrDefault(attrNS(pgMar, NS.w, 'footer'), 720) : 720,
+		gutter: pgMar ? intOrDefault(attrNS(pgMar, NS.w, 'gutter'), 0) : 0,
+	};
+
+	let columns: JPSectionColumns | undefined;
+	const cols = getFirstChild(el, NS.w, 'cols');
+	if (cols) {
+		const num = attrNS(cols, NS.w, 'num');
+		const space = attrNS(cols, NS.w, 'space');
+		const sep = attrNS(cols, NS.w, 'sep');
+		if (num && Number.parseInt(num, 10) > 1) {
+			columns = {
+				count: Number.parseInt(num, 10),
+				space: space ? Number.parseInt(space, 10) : 720,
+				separator: sep === '1' || sep === 'true',
+			};
+		}
+	}
+
+	let headerReferences: JPHeaderFooterRef[] | undefined;
+	const headerRefs = getDirectChildren(el, NS.w, 'headerReference');
+	if (headerRefs.length > 0) {
+		const refs: JPHeaderFooterRef[] = [];
+		for (const ref of headerRefs) {
+			const hfRef = parseHeaderFooterRef(ref, 'header', pkg, docRels, headers, footers);
+			if (hfRef) refs.push(hfRef);
+		}
+		if (refs.length > 0) headerReferences = refs;
+	}
+
+	let footerReferences: JPHeaderFooterRef[] | undefined;
+	const footerRefs = getDirectChildren(el, NS.w, 'footerReference');
+	if (footerRefs.length > 0) {
+		const refs: JPHeaderFooterRef[] = [];
+		for (const ref of footerRefs) {
+			const hfRef = parseHeaderFooterRef(ref, 'footer', pkg, docRels, headers, footers);
+			if (hfRef) refs.push(hfRef);
+		}
+		if (refs.length > 0) footerReferences = refs;
+	}
+
+	const result: JPSectionProperties = {
+		pageSize: { width, height },
+		margins,
+		orientation,
+		...(columns ? { columns } : {}),
+		...(headerReferences ? { headerReferences } : {}),
+		...(footerReferences ? { footerReferences } : {}),
+	};
+
+	return result;
+}
+
+function parseHeaderFooterRef(
+	el: Element,
+	kind: 'header' | 'footer',
+	pkg: DocxPackage,
+	docRels: RelationshipMap,
+	headers: Map<string, JPHeader>,
+	footers: Map<string, JPFooter>,
+): JPHeaderFooterRef | null {
+	const type = (attrNS(el, NS.w, 'type') || 'default') as JPHeaderFooterType;
+	const rId = attrNS(el, NS.r, 'id');
+	if (!rId) return null;
+
+	const rel = docRels.get(rId);
+	if (!rel) return null;
+
+	const target = resolveTarget(rel.target, 'word/');
+	const xml = pkg.xml.get(target);
+	if (!xml) return null;
+
+	const nodeId = generateId();
+	const content = parseHeaderFooterContent(xml, docRels, new Map());
+
+	if (kind === 'header') {
+		headers.set(nodeId, createHeader(nodeId, content));
+	} else {
+		footers.set(nodeId, createFooter(nodeId, content));
+	}
+
+	return { type, id: nodeId };
+}
+
+function parseHeaderFooterContent(
+	doc: Document,
+	rels: RelationshipMap,
+	mediaBag: MediaBag,
+): ReturnType<typeof createParagraph>[] {
+	const root = doc.documentElement;
+	const result: ReturnType<typeof createParagraph>[] = [];
+
+	const children = root.childNodes;
+	for (let i = 0; i < children.length; i++) {
+		const child = children[i];
+		if (child.nodeType !== 1) continue;
+		const ce = child as Element;
+		if (ce.namespaceURI === NS.w && ce.localName === 'p') {
+			result.push(parseParagraphElement(ce, rels, mediaBag));
+		}
+	}
+
+	return result;
+}
+
+// ─── Media Extraction ──────────────────────────────────────────────────────
+
+function extractMedia(pkg: DocxPackage, _docRels: RelationshipMap, mediaBag: MediaBag): void {
+	for (const [path, data] of pkg.entries) {
+		if (path.startsWith('word/media/')) {
+			const fileName = path.split('/').pop() || path;
+			const contentType = mimeFromExtension(fileName);
+			mediaBag.set(path, { data, contentType, fileName });
+		}
+	}
+}
+
+// ─── Metadata ──────────────────────────────────────────────────────────────
+
+function parseMetadata(pkg: DocxPackage): JPDocumentMetadata {
+	const coreXml = pkg.xml.get('docProps/core.xml');
+	if (!coreXml) return {};
+
+	const root = coreXml.documentElement;
+	if (!root) return {};
+
+	const metadata: Record<string, string> = {};
+
+	const title = getFirstChild(root, NS.dc, 'title');
+	if (title) {
+		const val = textContent(title);
+		if (val) metadata.title = val;
+	}
+
+	const creator = getFirstChild(root, NS.dc, 'creator');
+	if (creator) {
+		const val = textContent(creator);
+		if (val) metadata.author = val;
+	}
+
+	const description = getFirstChild(root, NS.dc, 'description');
+	if (description) {
+		const val = textContent(description);
+		if (val) metadata.description = val;
+	}
+
+	const created = getFirstChild(root, NS.dcterms, 'created');
+	if (created) {
+		const val = textContent(created);
+		if (val) metadata.created = val;
+	}
+
+	const modified = getFirstChild(root, NS.dcterms, 'modified');
+	if (modified) {
+		const val = textContent(modified);
+		if (val) metadata.modified = val;
+	}
+
+	const language = getFirstChild(root, NS.dc, 'language');
+	if (language) {
+		const val = textContent(language);
+		if (val) metadata.language = val;
+	}
+
+	return metadata as JPDocumentMetadata;
+}
+
+// ─── Helpers ───────────────────────────────────────────────────────────────
+
+function intOrDefault(val: string | null, fallback: number): number {
+	if (val === null) return fallback;
+	const n = Number.parseInt(val, 10);
+	return Number.isNaN(n) ? fallback : n;
+}

@@ -1,0 +1,22 @@
+{
+  "$schema": "https://unpkg.com/@changesets/config@3.0.0/schema.json",
+  "changelog": "@changesets/cli/changelog",
+  "commit": false,
+  "fixed": [],
+  "linked": [
+    [
+      "@jpoffice/model",
+      "@jpoffice/engine",
+      "@jpoffice/layout",
+      "@jpoffice/renderer",
+      "@jpoffice/react",
+      "@jpoffice/docx",
+      "@jpoffice/pdf",
+      "@jpoffice/core"
+    ]
+  ],
+  "access": "public",
+  "baseBranch": "main",
+  "updateInternalDependencies": "patch",
+  "ignore": []
+}
