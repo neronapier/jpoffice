@@ -50,4 +50,5 @@ export interface JPParagraphProperties {
 	readonly shading?: JPShading;
 	readonly tabs?: readonly JPTabStop[];
 	readonly runProperties?: JPRunProperties; // default run properties for paragraph
+	readonly direction?: 'ltr' | 'rtl'; // paragraph base direction (BiDi)
 }

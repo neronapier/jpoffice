@@ -1,4 +1,5 @@
 import type { JPEditor } from '../editor';
+import { documentToHtml } from '../plugins/clipboard/document-to-html';
 import type { KeyBinding } from './keybindings';
 import { DEFAULT_KEYBINDINGS, eventToShortcut } from './keybindings';
 
@@ -62,6 +63,14 @@ export class InputManager {
 		this.keybindings.push(binding);
 	}
 
+	private safeExecute(commandId: string, args?: unknown): void {
+		try {
+			this.editor.executeCommand(commandId, args);
+		} catch (e) {
+			console.warn(`[JPOffice] Command failed: ${commandId}`, e);
+		}
+	}
+
 	private onKeyDown = (e: KeyboardEvent): void => {
 		if (this.composing) return;
 		if (this.editor.getState().readOnly) return;
@@ -72,7 +81,7 @@ export class InputManager {
 		for (const binding of this.keybindings) {
 			if (binding.shortcut === shortcut) {
 				e.preventDefault();
-				this.editor.executeCommand(binding.commandId, binding.args);
+				this.safeExecute(binding.commandId, binding.args);
 				return;
 			}
 		}
@@ -80,28 +89,38 @@ export class InputManager {
 		// Handle special keys
 		if (e.key === 'Enter' && !e.shiftKey) {
 			e.preventDefault();
-			this.editor.executeCommand('text.insertParagraph');
+			this.safeExecute('text.insertParagraph');
 		} else if (e.key === 'Enter' && e.shiftKey) {
 			e.preventDefault();
-			this.editor.executeCommand('text.insertLineBreak');
+			this.safeExecute('text.insertLineBreak');
 		} else if (e.key === 'Backspace') {
 			e.preventDefault();
-			this.editor.executeCommand('text.deleteBackward');
+			this.safeExecute('text.deleteBackward');
 		} else if (e.key === 'Delete') {
 			e.preventDefault();
-			this.editor.executeCommand('text.deleteForward');
+			this.safeExecute('text.deleteForward');
+		} else if (e.key === 'Tab' && e.shiftKey) {
+			e.preventDefault();
+			this.safeExecute('text.shiftTab');
 		} else if (e.key === 'Tab') {
 			e.preventDefault();
-			this.editor.executeCommand('text.insertTab');
+			this.safeExecute('text.insertTab');
 		}
 		// Arrow keys, Home, End, etc. are handled by selection commands
 		else if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(e.key)) {
 			e.preventDefault();
-			this.editor.executeCommand('selection.move', {
+			this.safeExecute('selection.move', {
 				direction: e.key,
 				extend: e.shiftKey,
 				word: e.ctrlKey || e.metaKey,
 			});
+		}
+		// Handle printable characters directly to avoid browser input event inconsistencies
+		// (e.g., space with selection, or input events not firing reliably)
+		else if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+			e.preventDefault();
+			this.safeExecute('text.insert', { text: e.key });
+			if (this.textarea) this.textarea.value = '';
 		}
 	};
 
@@ -111,7 +130,7 @@ export class InputManager {
 
 		const input = e as InputEvent;
 		if (input.inputType === 'insertText' && input.data) {
-			this.editor.executeCommand('text.insert', { text: input.data });
+			this.safeExecute('text.insert', { text: input.data });
 			// Clear textarea after processing
 			if (this.textarea) this.textarea.value = '';
 		}
@@ -126,7 +145,7 @@ export class InputManager {
 		if (this.editor.getState().readOnly) return;
 
 		if (e.data) {
-			this.editor.executeCommand('text.insert', { text: e.data });
+			this.safeExecute('text.insert', { text: e.data });
 		}
 		if (this.textarea) this.textarea.value = '';
 	};
@@ -135,10 +154,32 @@ export class InputManager {
 		e.preventDefault();
 		if (this.editor.getState().readOnly) return;
 
+		const html = e.clipboardData?.getData('text/html');
 		const text = e.clipboardData?.getData('text/plain');
-		if (text) {
-			this.editor.executeCommand('text.insert', { text });
+
+		// Check for pasted images
+		const items = Array.from(e.clipboardData?.items ?? []);
+		const imageItem = items.find((i) => i.type.startsWith('image/'));
+
+		if (imageItem) {
+			const file = imageItem.getAsFile();
+			if (file) {
+				const reader = new FileReader();
+				reader.onload = () => {
+					const dataUrl = reader.result as string;
+					this.safeExecute('image.insert', {
+						src: dataUrl,
+						mimeType: file.type,
+						width: 4800, // default ~200px in EMU
+						height: 3600, // default ~150px in EMU
+					});
+				};
+				reader.readAsDataURL(file);
+				return;
+			}
 		}
+
+		this.safeExecute('clipboard.paste', { html, text });
 	};
 
 	private onCopy = (e: ClipboardEvent): void => {
@@ -147,16 +188,45 @@ export class InputManager {
 		if (text) {
 			e.clipboardData?.setData('text/plain', text);
 		}
+
+		// Write HTML for rich copy
+		const sel = this.editor.getSelection();
+		if (sel) {
+			try {
+				const html = documentToHtml(this.editor.getDocument(), sel);
+				if (html) {
+					e.clipboardData?.setData('text/html', html);
+				}
+			} catch {
+				// Silently fall back to plain text only
+			}
+		}
 	};
 
 	private onCut = (e: ClipboardEvent): void => {
 		e.preventDefault();
 		if (this.editor.getState().readOnly) return;
 
+		const sel = this.editor.getSelection();
 		const text = this.editor.getSelectedText();
 		if (text) {
 			e.clipboardData?.setData('text/plain', text);
-			this.editor.executeCommand('text.deleteSelection');
+		}
+
+		// Write HTML for rich cut
+		if (sel) {
+			try {
+				const html = documentToHtml(this.editor.getDocument(), sel);
+				if (html) {
+					e.clipboardData?.setData('text/html', html);
+				}
+			} catch {
+				// Silently fall back to plain text only
+			}
+		}
+
+		if (text) {
+			this.safeExecute('text.deleteSelection');
 		}
 	};
 }

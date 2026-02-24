@@ -27,7 +27,17 @@ export type JPNodeType =
 	| 'footer'
 	| 'hyperlink'
 	| 'bookmark-start'
-	| 'bookmark-end';
+	| 'bookmark-end'
+	| 'field'
+	| 'comment-range-start'
+	| 'comment-range-end'
+	| 'footnote-ref'
+	| 'endnote-ref'
+	| 'equation'
+	| 'shape'
+	| 'shape-group'
+	| 'textbox'
+	| 'mention';
 
 /**
  * Base interface for all nodes.

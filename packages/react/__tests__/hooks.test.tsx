@@ -1,23 +1,23 @@
-import { describe, it, expect, vi } from 'vitest';
-import React from 'react';
-import { renderHook, act } from '@testing-library/react';
+import { JPEditor } from '@jpoffice/engine';
 import {
-	createDocument,
+	DEFAULT_SECTION_PROPERTIES,
 	createBody,
-	createSection,
+	createDocument,
 	createParagraph,
 	createRun,
+	createSection,
 	createText,
 	generateId,
-	DEFAULT_SECTION_PROPERTIES,
 } from '@jpoffice/model';
-import { JPEditor } from '@jpoffice/engine';
+import { act, renderHook } from '@testing-library/react';
+import type React from 'react';
+import { describe, expect, it, vi } from 'vitest';
 import { EditorContext } from '../src/context/editor-context';
 import type { EditorContextValue } from '../src/context/editor-context';
+import { useCommand } from '../src/hooks/useCommand';
 import { useEditor } from '../src/hooks/useEditor';
 import { useEditorState } from '../src/hooks/useEditorState';
 import { useSelection } from '../src/hooks/useSelection';
-import { useCommand } from '../src/hooks/useCommand';
 
 function makeDoc(text = 'Hello World') {
 	return createDocument({

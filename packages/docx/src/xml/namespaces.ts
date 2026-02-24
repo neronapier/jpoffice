@@ -26,6 +26,8 @@ export const NS = {
 	wps: 'http://schemas.microsoft.com/office/word/2010/wordprocessingShape',
 	/** Word Processing Drawing (2010+) */
 	wp14: 'http://schemas.microsoft.com/office/word/2010/wordprocessingDrawing',
+	/** Math ML */
+	m: 'http://schemas.openxmlformats.org/officeDocument/2006/math',
 } as const;
 
 /** Relationship type URIs used in .rels files */
@@ -41,6 +43,9 @@ export const REL_TYPE = {
 	coreProperties:
 		'http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties',
 	settings: 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/settings',
+	comments: 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments',
+	footnotes: 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/footnotes',
+	endnotes: 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/endnotes',
 } as const;
 
 /** Content types for [Content_Types].xml */
@@ -58,4 +63,7 @@ export const CONTENT_TYPE = {
 	gif: 'image/gif',
 	bmp: 'image/bmp',
 	tiff: 'image/tiff',
+	comments: 'application/vnd.openxmlformats-officedocument.wordprocessingml.comments+xml',
+	footnotes: 'application/vnd.openxmlformats-officedocument.wordprocessingml.footnotes+xml',
+	endnotes: 'application/vnd.openxmlformats-officedocument.wordprocessingml.endnotes+xml',
 } as const;

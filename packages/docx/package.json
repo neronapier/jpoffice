@@ -1,6 +1,6 @@
 {
   "name": "@jpoffice/docx",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "JPOffice DOCX import/export",
   "type": "module",
   "main": "./dist/index.cjs",

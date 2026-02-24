@@ -3,13 +3,41 @@
  * Dimensions are in EMU (914400 per inch).
  */
 
+/**
+ * Crop rectangle expressed as percentages (0-1) from each edge.
+ * e.g. { top: 0.1, right: 0, bottom: 0.1, left: 0 } crops 10% from top and bottom.
+ */
+export interface JPImageCrop {
+	readonly top: number;
+	readonly right: number;
+	readonly bottom: number;
+	readonly left: number;
+}
+
+/**
+ * Wrap type for text wrapping around images.
+ * - 'inline': image is inline with text (no wrapping)
+ * - 'square': text wraps in a rectangular bounding box
+ * - 'tight': text wraps tightly around the image contour
+ * - 'behind': image is behind the text layer
+ * - 'inFront': image is in front of the text layer
+ */
+export type JPImageWrapType = 'inline' | 'square' | 'tight' | 'behind' | 'inFront';
+
 export interface JPImageProperties {
 	readonly src: string; // data URL, blob URL, or relative path
 	readonly mimeType: string; // 'image/png', 'image/jpeg', etc.
 	readonly width: number; // EMU
 	readonly height: number; // EMU
+	readonly originalWidth?: number; // EMU - original dimensions for resetSize
+	readonly originalHeight?: number; // EMU - original dimensions for resetSize
 	readonly altText?: string;
 	readonly title?: string;
+	readonly crop?: JPImageCrop; // crop percentages from each edge (0-1)
+	readonly rotation?: number; // rotation in degrees (clockwise)
+	readonly flipH?: boolean; // horizontal flip
+	readonly flipV?: boolean; // vertical flip
+	readonly wrapType?: JPImageWrapType; // text wrap mode
 }
 
 export type JPWrapSide = 'both' | 'left' | 'right' | 'largest';

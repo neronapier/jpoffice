@@ -1,18 +1,18 @@
-import { describe, it, expect } from 'vitest';
 import {
-	createTable,
-	createTableRow,
-	createTableCell,
 	createParagraph,
 	createRun,
+	createTable,
+	createTableCell,
+	createTableRow,
 	createText,
 	generateId,
 } from '@jpoffice/model';
 import type { JPTableGridCol } from '@jpoffice/model';
-import { buildCellGrid, resolveColumnWidths, layoutTable } from '../src/table-layout';
+import { createStyleRegistry } from '@jpoffice/model';
+import { describe, expect, it } from 'vitest';
+import { buildCellGrid, layoutTable, resolveColumnWidths } from '../src/table-layout';
 import type { CellContentLayoutFn } from '../src/table-layout';
 import { TextMeasurer } from '../src/text-measurer';
-import { createStyleRegistry } from '@jpoffice/model';
 
 const emptyStyles = createStyleRegistry([]);
 
@@ -60,9 +60,7 @@ describe('buildCellGrid', () => {
 
 	it('handles gridSpan (horizontal merge)', () => {
 		const table = makeTable([
-			makeRow([
-				makeCell('Merged', { gridSpan: 2 }),
-			]),
+			makeRow([makeCell('Merged', { gridSpan: 2 })]),
 			makeRow([makeCell('A'), makeCell('B')]),
 		]);
 		const grid = buildCellGrid(table);
@@ -72,14 +70,8 @@ describe('buildCellGrid', () => {
 
 	it('handles vertical merge', () => {
 		const table = makeTable([
-			makeRow([
-				makeCell('Top', { verticalMerge: 'restart' }),
-				makeCell('B'),
-			]),
-			makeRow([
-				makeCell('', { verticalMerge: 'continue' }),
-				makeCell('D'),
-			]),
+			makeRow([makeCell('Top', { verticalMerge: 'restart' }), makeCell('B')]),
+			makeRow([makeCell('', { verticalMerge: 'continue' }), makeCell('D')]),
 		]);
 		const grid = buildCellGrid(table);
 		expect(grid[0][0]).toBe(grid[1][0]); // same entry
@@ -95,9 +87,7 @@ describe('buildCellGrid', () => {
 
 describe('resolveColumnWidths', () => {
 	it('divides evenly when no grid specified', () => {
-		const table = makeTable([
-			makeRow([makeCell('A'), makeCell('B'), makeCell('C')]),
-		]);
+		const table = makeTable([makeRow([makeCell('A'), makeCell('B'), makeCell('C')])]);
 		const widths = resolveColumnWidths(table, 300);
 		expect(widths).toHaveLength(3);
 		expect(widths[0]).toBeCloseTo(100);
@@ -143,10 +133,7 @@ describe('layoutTable', () => {
 
 	it('returns a table with correct structure', () => {
 		const table = makeTable(
-			[
-				makeRow([makeCell('A'), makeCell('B')]),
-				makeRow([makeCell('C'), makeCell('D')]),
-			],
+			[makeRow([makeCell('A'), makeCell('B')]), makeRow([makeCell('C'), makeCell('D')])],
 			[{ width: 3000 }, { width: 3000 }],
 		);
 
@@ -168,10 +155,7 @@ describe('layoutTable', () => {
 	});
 
 	it('positions table at startX and startY', () => {
-		const table = makeTable(
-			[makeRow([makeCell('A')])],
-			[{ width: 3000 }],
-		);
+		const table = makeTable([makeRow([makeCell('A')])], [{ width: 3000 }]);
 
 		const result = layoutTable(
 			table,
@@ -190,10 +174,7 @@ describe('layoutTable', () => {
 
 	it('rows are stacked vertically', () => {
 		const table = makeTable(
-			[
-				makeRow([makeCell('Row1')]),
-				makeRow([makeCell('Row2')]),
-			],
+			[makeRow([makeCell('Row1')]), makeRow([makeCell('Row2')])],
 			[{ width: 5000 }],
 		);
 
@@ -213,10 +194,7 @@ describe('layoutTable', () => {
 
 	it('total height equals sum of row heights', () => {
 		const table = makeTable(
-			[
-				makeRow([makeCell('A')]),
-				makeRow([makeCell('B')]),
-			],
+			[makeRow([makeCell('A')]), makeRow([makeCell('B')])],
 			[{ width: 5000 }],
 		);
 

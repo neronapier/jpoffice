@@ -26,33 +26,33 @@ function baseStyle(overrides?: Partial<ResolvedRunStyle>): ResolvedRunStyle {
 describe('TextRenderer.buildFont', () => {
 	it('builds basic font string', () => {
 		const font = TextRenderer.buildFont(baseStyle());
-		expect(font).toBe('12px Arial');
+		expect(font).toBe('12px "Arial", sans-serif');
 	});
 
 	it('includes bold', () => {
 		const font = TextRenderer.buildFont(baseStyle({ bold: true }));
-		expect(font).toBe('bold 12px Arial');
+		expect(font).toBe('bold 12px "Arial", sans-serif');
 	});
 
 	it('includes italic', () => {
 		const font = TextRenderer.buildFont(baseStyle({ italic: true }));
-		expect(font).toBe('italic 12px Arial');
+		expect(font).toBe('italic 12px "Arial", sans-serif');
 	});
 
 	it('includes bold and italic', () => {
 		const font = TextRenderer.buildFont(baseStyle({ bold: true, italic: true }));
-		expect(font).toBe('italic bold 12px Arial');
+		expect(font).toBe('italic bold 12px "Arial", sans-serif');
 	});
 
 	it('uses custom font family and size', () => {
 		const font = TextRenderer.buildFont(
 			baseStyle({ fontFamily: 'Times New Roman', fontSize: 16 }),
 		);
-		expect(font).toBe('16px Times New Roman');
+		expect(font).toBe('16px "Times New Roman", sans-serif');
 	});
 
 	it('handles different font sizes', () => {
 		const font = TextRenderer.buildFont(baseStyle({ fontSize: 24 }));
-		expect(font).toBe('24px Arial');
+		expect(font).toBe('24px "Arial", sans-serif');
 	});
 });

@@ -39,6 +39,36 @@ export { createHyperlink } from './nodes/hyperlink';
 export type { JPBookmarkStart, JPBookmarkEnd } from './nodes/bookmark';
 export { createBookmarkStart, createBookmarkEnd } from './nodes/bookmark';
 
+export type { JPCommentRangeStart, JPCommentRangeEnd, JPComment } from './nodes/comment';
+export { createCommentRangeStart, createCommentRangeEnd, createComment } from './nodes/comment';
+
+export type { JPField, JPFieldType } from './nodes/field';
+export { createField, isField } from './nodes/field';
+
+export type { JPEquation } from './nodes/equation';
+export { createEquation, isEquation } from './nodes/equation';
+
+export type { JPShapeType, JPShapeFill, JPShapeStroke, JPShape } from './nodes/shape';
+export { createShape, isShape } from './nodes/shape';
+
+export type { JPShapeGroup } from './nodes/shape-group';
+export { createShapeGroup, isShapeGroup } from './nodes/shape-group';
+
+export type { JPMentionType, JPMention } from './nodes/mention';
+export { createMention, isMention } from './nodes/mention';
+
+export type { JPTextBox } from './nodes/textbox';
+export { createTextBox, isTextBox } from './nodes/textbox';
+
+export type { JPFootnoteRef, JPEndnoteRef, JPFootnote } from './nodes/footnote';
+export {
+	createFootnoteRef,
+	createEndnoteRef,
+	createFootnote,
+	isFootnoteRef,
+	isEndnoteRef,
+} from './nodes/footnote';
+
 export type { JPPageBreak, JPLineBreak, JPColumnBreak, JPTab } from './nodes/break';
 export { createPageBreak, createLineBreak, createColumnBreak, createTab } from './nodes/break';
 
@@ -66,6 +96,12 @@ export type {
 } from './properties/border-props';
 
 export type { JPRunProperties, JPUnderlineStyle } from './properties/run-props';
+
+export type {
+	JPRevisionInfo,
+	JPRevisionType,
+	JPTrackChangesConfig,
+} from './properties/revision-props';
 
 export type {
 	JPParagraphProperties,
@@ -100,6 +136,8 @@ export type {
 } from './properties/table-props';
 
 export type {
+	JPImageCrop,
+	JPImageWrapType,
 	JPImageProperties,
 	JPWrapSide,
 	JPWrapping,

@@ -1,8 +1,11 @@
 import type { JPBody } from './nodes/body';
+import type { JPComment } from './nodes/comment';
+import type { JPFootnote } from './nodes/footnote';
 import type { JPFooter, JPHeader } from './nodes/header-footer';
 import type { JPElement } from './nodes/node';
 import { EMPTY_NUMBERING_REGISTRY } from './properties/numbering';
 import type { JPNumberingRegistry } from './properties/numbering';
+import type { JPTrackChangesConfig } from './properties/revision-props';
 import { createStyleRegistry } from './styles/style-registry';
 import type { JPStyleRegistry } from './styles/style-registry';
 
@@ -42,6 +45,11 @@ export interface JPDocument extends JPElement {
 	readonly media: ReadonlyMap<string, JPMediaAsset>;
 	readonly headers: ReadonlyMap<string, JPHeader>;
 	readonly footers: ReadonlyMap<string, JPFooter>;
+	readonly comments: readonly JPComment[];
+	readonly footnotes: readonly JPFootnote[];
+	readonly endnotes: readonly JPFootnote[];
+	readonly trackChanges?: JPTrackChangesConfig;
+	readonly themeColors?: Record<string, string>;
 }
 
 export function createDocument(config: {
@@ -53,6 +61,11 @@ export function createDocument(config: {
 	media?: ReadonlyMap<string, JPMediaAsset>;
 	headers?: ReadonlyMap<string, JPHeader>;
 	footers?: ReadonlyMap<string, JPFooter>;
+	comments?: readonly JPComment[];
+	footnotes?: readonly JPFootnote[];
+	endnotes?: readonly JPFootnote[];
+	trackChanges?: JPTrackChangesConfig;
+	themeColors?: Record<string, string>;
 }): JPDocument {
 	return {
 		type: 'document',
@@ -64,6 +77,11 @@ export function createDocument(config: {
 		media: config.media ?? new Map(),
 		headers: config.headers ?? new Map(),
 		footers: config.footers ?? new Map(),
+		comments: config.comments ?? [],
+		footnotes: config.footnotes ?? [],
+		endnotes: config.endnotes ?? [],
+		trackChanges: config.trackChanges,
+		themeColors: config.themeColors,
 	};
 }
 

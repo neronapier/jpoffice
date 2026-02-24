@@ -73,6 +73,15 @@ export class JPPluginManager {
 	}
 
 	/**
+	 * Reset all plugins' internal state (for document replacement).
+	 */
+	resetAll(editor: JPEditor): void {
+		for (const plugin of this.plugins) {
+			plugin.reset?.(editor);
+		}
+	}
+
+	/**
 	 * Destroy all plugins.
 	 */
 	destroyAll(): void {

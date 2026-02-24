@@ -1,4 +1,4 @@
-import type { JPDrawing } from '@jpoffice/model';
+import type { JPDrawing, JPShape, JPShapeType } from '@jpoffice/model';
 import { NS } from '../xml/namespaces';
 import type { XmlBuilder } from '../xml/xml-builder';
 
@@ -146,6 +146,124 @@ function writeWrapping(b: XmlBuilder, wrapping: { type: string; side?: string })
 		default:
 			b.empty('wp:wrapNone');
 	}
+}
+
+/** Serialize a JPShape to w:drawing XML with wps:wsp content. */
+export function writeShape(b: XmlBuilder, shape: JPShape): void {
+	b.open('w:drawing');
+	b.open('wp:anchor', {
+		'xmlns:wp': NS.wp,
+		behindDoc: '0',
+		allowOverlap: '1',
+		simplePos: '0',
+		relativeHeight: String(shape.zIndex || 0),
+		locked: '0',
+		layoutInCell: '1',
+		distT: '0',
+		distB: '0',
+		distL: '0',
+		distR: '0',
+	});
+
+	b.empty('wp:simplePos', { x: '0', y: '0' });
+	b.open('wp:positionH', { relativeFrom: 'column' });
+	b.open('wp:posOffset');
+	b.text(String(shape.x));
+	b.close();
+	b.close();
+	b.open('wp:positionV', { relativeFrom: 'paragraph' });
+	b.open('wp:posOffset');
+	b.text(String(shape.y));
+	b.close();
+	b.close();
+
+	b.empty('wp:extent', { cx: shape.width, cy: shape.height });
+	b.empty('wp:wrapNone');
+
+	b.open('wp:docPr', { id: '1', name: shape.shapeType });
+	b.close();
+
+	b.open('a:graphic', { 'xmlns:a': NS.a });
+	b.open('a:graphicData', { uri: NS.wps });
+	b.open('wps:wsp', { 'xmlns:wps': NS.wps });
+
+	b.open('wps:spPr');
+
+	b.open('a:xfrm', shape.rotation ? { rot: Math.round(shape.rotation * 60000) } : {});
+	b.empty('a:off', { x: '0', y: '0' });
+	b.empty('a:ext', { cx: shape.width, cy: shape.height });
+	b.close(); // a:xfrm
+
+	const prst = mapShapeTypeToOoxml(shape.shapeType);
+	b.open('a:prstGeom', { prst });
+	b.empty('a:avLst');
+	b.close();
+
+	if (shape.fill) {
+		if (shape.fill.type === 'solid' && shape.fill.color) {
+			b.open('a:solidFill');
+			b.empty('a:srgbClr', { val: shape.fill.color });
+			b.close();
+		} else if (shape.fill.type === 'none') {
+			b.empty('a:noFill');
+		}
+	}
+
+	if (shape.stroke) {
+		b.open('a:ln', { w: shape.stroke.width });
+		b.open('a:solidFill');
+		b.empty('a:srgbClr', { val: shape.stroke.color });
+		b.close();
+		b.close();
+	}
+
+	b.close(); // wps:spPr
+
+	b.open('wps:bodyPr');
+	b.close();
+
+	if (shape.text) {
+		b.open('wps:txbxContent');
+		b.open('w:p', { 'xmlns:w': NS.w });
+		b.open('w:r');
+		b.open('w:t', { 'xml:space': 'preserve' });
+		b.text(shape.text);
+		b.close();
+		b.close();
+		b.close(); // w:p
+		b.close(); // wps:txbxContent
+	}
+
+	b.close(); // wps:wsp
+	b.close(); // a:graphicData
+	b.close(); // a:graphic
+
+	b.close(); // wp:anchor
+	b.close(); // w:drawing
+}
+
+function mapShapeTypeToOoxml(type: JPShapeType): string {
+	const mapping: Record<JPShapeType, string> = {
+		rectangle: 'rect',
+		'rounded-rectangle': 'roundRect',
+		ellipse: 'ellipse',
+		triangle: 'triangle',
+		diamond: 'diamond',
+		pentagon: 'pentagon',
+		hexagon: 'hexagon',
+		star: 'star5',
+		'arrow-right': 'rightArrow',
+		'arrow-left': 'leftArrow',
+		'arrow-up': 'upArrow',
+		'arrow-down': 'downArrow',
+		line: 'line',
+		'curved-line': 'curvedConnector3',
+		connector: 'straightConnector1',
+		callout: 'wedgeRoundRectCallout',
+		cloud: 'cloudCallout',
+		heart: 'heart',
+	};
+	return mapping[type] || 'rect';
 }
 
 /**

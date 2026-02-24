@@ -62,6 +62,12 @@ export class ContentStreamBuilder {
 		return this;
 	}
 
+	/** Show text as hex string (Tj) — for CID fonts with Identity-H encoding. */
+	showTextHex(hexString: string): this {
+		this.parts.push(`<${hexString}> Tj`);
+		return this;
+	}
+
 	// -- Color --
 
 	/** Set fill color RGB (rg) — values 0-1 */
@@ -90,9 +96,23 @@ export class ContentStreamBuilder {
 		return this;
 	}
 
+	/** Bezier curve to point (c) — two control points + end point */
+	curveTo(x1: number, y1: number, x2: number, y2: number, x3: number, y3: number): this {
+		this.parts.push(
+			`${round(x1)} ${round(y1)} ${round(x2)} ${round(y2)} ${round(x3)} ${round(y3)} c`,
+		);
+		return this;
+	}
+
 	/** Rectangle (re) */
 	rect(x: number, y: number, w: number, h: number): this {
 		this.parts.push(`${round(x)} ${round(y)} ${round(w)} ${round(h)} re`);
+		return this;
+	}
+
+	/** Close subpath (h) */
+	closePath(): this {
+		this.parts.push('h');
 		return this;
 	}
 
@@ -124,11 +144,39 @@ export class ContentStreamBuilder {
 		return this;
 	}
 
+	/** Set line dash pattern (d) */
+	setDash(dashArray: readonly number[], phase: number): this {
+		const arr = dashArray.map((v) => round(v)).join(' ');
+		this.parts.push(`[${arr}] ${round(phase)} d`);
+		return this;
+	}
+
 	// -- XObjects (images) --
 
 	/** Draw XObject (Do) */
 	drawXObject(name: string): this {
 		this.parts.push(`${name} Do`);
+		return this;
+	}
+
+	// -- Marked content (Tagged PDF) --
+
+	/**
+	 * Begin a marked content sequence with a tag and MCID (BDC).
+	 * Used for Tagged PDF accessibility: wraps content with structure info.
+	 * Outputs: /Tag <</MCID N>> BDC
+	 */
+	beginMarkedContent(tag: string, mcid: number): this {
+		this.parts.push(`/${tag} <</MCID ${mcid}>> BDC`);
+		return this;
+	}
+
+	/**
+	 * End a marked content sequence (EMC).
+	 * Must be paired with a preceding beginMarkedContent().
+	 */
+	endMarkedContent(): this {
+		this.parts.push('EMC');
 		return this;
 	}
 

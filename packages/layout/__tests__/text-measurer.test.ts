@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { TextMeasurer } from '../src/text-measurer';
 import type { ResolvedRunStyle } from '../src/types';
 

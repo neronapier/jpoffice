@@ -5,6 +5,8 @@
  * Font sizes are in half-points (w:sz): 24 = 12pt.
  */
 
+import type { JPRevisionInfo } from './revision-props';
+
 export type JPUnderlineStyle =
 	| 'none'
 	| 'single'
@@ -34,4 +36,11 @@ export interface JPRunProperties {
 	readonly smallCaps?: boolean;
 	readonly letterSpacing?: number; // twips
 	readonly language?: string; // BCP47, e.g. 'es-AR'
+
+	readonly direction?: 'ltr' | 'rtl' | 'auto'; // run direction override (BiDi)
+
+	// Track changes / revision tracking
+	readonly revision?: JPRevisionInfo;
+	/** For formatChange revisions: stores the properties before the format change */
+	readonly previousProperties?: Partial<JPRunProperties>;
 }

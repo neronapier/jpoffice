@@ -2,12 +2,15 @@ import type { JPSectionProperties } from '../properties/section-props';
 import type { JPPageBreak } from './break';
 import type { JPElement } from './node';
 import type { JPParagraph } from './paragraph';
+import type { JPShape } from './shape';
+import type { JPShapeGroup } from './shape-group';
 import type { JPTable } from './table';
+import type { JPTextBox } from './textbox';
 
 /**
  * Block-level nodes that can appear in a section.
  */
-export type JPBlockNode = JPParagraph | JPTable | JPPageBreak;
+export type JPBlockNode = JPParagraph | JPTable | JPPageBreak | JPShape | JPShapeGroup | JPTextBox;
 
 /**
  * JPSection represents a page layout region.

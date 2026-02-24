@@ -1,7 +1,10 @@
 import type { JPDocument } from '@jpoffice/model';
 import { strToU8, zipSync } from 'fflate';
+import { REL_TYPE } from '../xml/namespaces';
+import { writeComments } from './comment-writer';
 import { writeContentTypes } from './content-types-writer';
 import { writeCoreProperties, writeDocument } from './document-writer';
+import { writeFootnotes } from './footnote-writer';
 import { writeNumbering } from './numbering-writer';
 import {
 	RelationshipTracker,
@@ -35,7 +38,29 @@ export function exportDocx(doc: JPDocument, _options?: DocxExportOptions): Uint8
 	const hasNumbering = doc.numbering.instances.length > 0;
 	const numberingXml = hasNumbering ? writeNumbering(doc.numbering) : null;
 
-	// 4. Generate core properties (if metadata present)
+	// 4. Generate footnotes.xml and endnotes.xml (if needed)
+	const hasFootnotes = doc.footnotes.length > 0;
+	const footnotesXml = hasFootnotes ? writeFootnotes(doc.footnotes, 'footnote') : null;
+
+	const hasEndnotes = doc.endnotes.length > 0;
+	const endnotesXml = hasEndnotes ? writeFootnotes(doc.endnotes, 'endnote') : null;
+
+	if (hasFootnotes) {
+		tracker.add(REL_TYPE.footnotes, 'footnotes.xml');
+	}
+	if (hasEndnotes) {
+		tracker.add(REL_TYPE.endnotes, 'endnotes.xml');
+	}
+
+	// 5. Generate comments.xml (if needed)
+	const hasComments = doc.comments.length > 0;
+	const commentsXml = hasComments ? writeComments(doc.comments) : null;
+
+	if (hasComments) {
+		tracker.add(REL_TYPE.comments, 'comments.xml');
+	}
+
+	// 7. Generate core properties (if metadata present)
 	const hasMetadata =
 		doc.metadata.title ||
 		doc.metadata.author ||
@@ -44,20 +69,23 @@ export function exportDocx(doc: JPDocument, _options?: DocxExportOptions): Uint8
 		doc.metadata.modified;
 	const coreXml = hasMetadata ? writeCoreProperties(doc.metadata) : null;
 
-	// 5. Generate relationships
+	// 8. Generate relationships
 	const pkgRelsXml = writePkgRelationships(!!coreXml);
 	const docRelsXml = writeDocRelationships(tracker);
 
-	// 6. Generate content types
+	// 9. Generate content types
 	const contentTypesXml = writeContentTypes({
 		hasNumbering,
+		hasFootnotes,
+		hasEndnotes,
+		hasComments,
 		hasCoreProperties: !!coreXml,
 		mediaFiles: mediaEntries.map((m) => ({ path: m.path, mimeType: m.mimeType })),
 		headerPaths: headerEntries.map((h) => h.path),
 		footerPaths: footerEntries.map((f) => f.path),
 	});
 
-	// 7. Assemble ZIP entries
+	// 10. Assemble ZIP entries
 	const zipData: Record<string, Uint8Array> = {
 		'[Content_Types].xml': strToU8(contentTypesXml),
 		'_rels/.rels': strToU8(pkgRelsXml),
@@ -68,6 +96,18 @@ export function exportDocx(doc: JPDocument, _options?: DocxExportOptions): Uint8
 
 	if (numberingXml) {
 		zipData['word/numbering.xml'] = strToU8(numberingXml);
+	}
+
+	if (footnotesXml) {
+		zipData['word/footnotes.xml'] = strToU8(footnotesXml);
+	}
+
+	if (endnotesXml) {
+		zipData['word/endnotes.xml'] = strToU8(endnotesXml);
+	}
+
+	if (commentsXml) {
+		zipData['word/comments.xml'] = strToU8(commentsXml);
 	}
 
 	if (coreXml) {
@@ -89,6 +129,6 @@ export function exportDocx(doc: JPDocument, _options?: DocxExportOptions): Uint8
 		zipData[entry.path] = entry.data;
 	}
 
-	// 8. Create ZIP and return
+	// 11. Create ZIP and return
 	return zipSync(zipData);
 }

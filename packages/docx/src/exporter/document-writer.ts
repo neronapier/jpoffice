@@ -1,15 +1,19 @@
 import type {
 	JPDocument,
 	JPDrawing,
+	JPEquation,
 	JPFooter,
 	JPHeader,
 	JPParagraph,
+	JPRun,
 	JPSection,
 	JPSectionProperties,
+	JPShape,
 } from '@jpoffice/model';
 import { NS, REL_TYPE } from '../xml/namespaces';
 import { XmlBuilder } from '../xml/xml-builder';
-import { dataUrlToUint8Array, extensionFromMime, writeDrawing } from './drawing-writer';
+import { dataUrlToUint8Array, extensionFromMime, writeDrawing, writeShape } from './drawing-writer';
+import { writeEquation } from './equation-writer';
 import type { RelationshipTracker } from './relationships-writer';
 import { writeParagraphProperties, writeRun } from './run-writer';
 import { writeTable } from './table-writer';
@@ -224,7 +228,7 @@ function writeInlineContent(
 ): void {
 	for (const child of para.children) {
 		if (child.type === 'run') {
-			writeRun(b, child);
+			writeRunWithRevision(b, child);
 		} else if (child.type === 'hyperlink') {
 			const rId = tracker.add(REL_TYPE.hyperlink, child.href, 'External');
 			b.open('w:hyperlink', { 'r:id': rId });
@@ -247,14 +251,73 @@ function writeInlineContent(
 			});
 		} else if (child.type === 'bookmark-end') {
 			b.empty('w:bookmarkEnd', { 'w:id': child.bookmarkId });
+		} else if (child.type === 'comment-range-start') {
+			b.empty('w:commentRangeStart', { 'w:id': child.commentId });
+		} else if (child.type === 'comment-range-end') {
+			b.empty('w:commentRangeEnd', { 'w:id': child.commentId });
+			// Write the inline comment reference run after the range end
+			b.open('w:r');
+			b.empty('w:commentReference', { 'w:id': child.commentId });
+			b.close(); // w:r
+		} else if (child.type === 'footnote-ref') {
+			b.open('w:r');
+			b.open('w:rPr');
+			b.empty('w:rStyle', { 'w:val': 'FootnoteReference' });
+			b.close(); // w:rPr
+			b.empty('w:footnoteReference', { 'w:id': child.footnoteId });
+			b.close(); // w:r
+		} else if (child.type === 'endnote-ref') {
+			b.open('w:r');
+			b.open('w:rPr');
+			b.empty('w:rStyle', { 'w:val': 'EndnoteReference' });
+			b.close(); // w:rPr
+			b.empty('w:endnoteReference', { 'w:id': child.footnoteId });
+			b.close(); // w:r
 		} else if (
 			child.type === 'line-break' ||
 			child.type === 'column-break' ||
 			child.type === 'tab'
 		) {
 			writeRun(b, child);
+		} else if (child.type === 'field') {
+			b.open('w:fldSimple', { 'w:instr': ` ${child.instruction} ` });
+			b.open('w:r');
+			b.open('w:t', { 'xml:space': 'preserve' });
+			b.text(child.cachedResult);
+			b.close(); // w:t
+			b.close(); // w:r
+			b.close(); // w:fldSimple
+		} else if (child.type === 'shape') {
+			b.open('w:r');
+			writeShape(b, child as JPShape);
+			b.close(); // w:r
+		} else if (child.type === 'equation') {
+			writeEquation(b, child as JPEquation);
 		}
 	}
+}
+
+// ─── Track Changes Writing ──────────────────────────────────────────────────
+
+/**
+ * Write a run, wrapping it in w:ins or w:del if it has revision info.
+ * For 'formatChange', the run is written normally (rPrChange is handled in run-writer).
+ */
+function writeRunWithRevision(b: XmlBuilder, run: JPRun): void {
+	const revision = run.properties?.revision;
+	if (!revision || revision.type === 'formatChange') {
+		writeRun(b, run);
+		return;
+	}
+
+	const wrapTag = revision.type === 'insertion' ? 'w:ins' : 'w:del';
+	b.open(wrapTag, {
+		'w:id': revision.revisionId,
+		'w:author': revision.author,
+		'w:date': revision.date,
+	});
+	writeRun(b, run);
+	b.close(); // w:ins or w:del
 }
 
 function extractDrawingImage(

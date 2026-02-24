@@ -4,21 +4,26 @@ import type {
 	JPFloatPosition,
 	JPFloatRelativeTo,
 	JPImageProperties,
+	JPInlineNode,
+	JPShape,
+	JPShapeFill,
+	JPShapeStroke,
+	JPShapeType,
 	JPWrapSide,
 	JPWrapping,
 } from '@jpoffice/model';
-import { createDrawing, createImage, generateId } from '@jpoffice/model';
+import { createDrawing, createImage, createShape, generateId } from '@jpoffice/model';
 import { NS } from '../xml/namespaces';
 import { attrNS, getFirstChild, textContent } from '../xml/xml-parser';
 import type { RelationshipMap } from './relationships-parser';
 import type { MediaBag } from './table-parser';
 
-/** Parse a w:drawing element into JPDrawing nodes. */
+/** Parse a w:drawing element into JPDrawing or JPShape nodes. */
 export function parseDrawing(
 	el: Element,
 	rels: RelationshipMap,
 	mediaBag: MediaBag,
-): ReturnType<typeof createDrawing> | null {
+): JPInlineNode | null {
 	// Try inline first
 	const inline = getFirstChild(el, NS.wp, 'inline');
 	if (inline) return parseInlineDrawing(inline, rels, mediaBag);
@@ -78,7 +83,11 @@ function parseAnchorDrawing(
 	el: Element,
 	rels: RelationshipMap,
 	mediaBag: MediaBag,
-): ReturnType<typeof createDrawing> | null {
+): JPInlineNode | null {
+	// Check for shape (wps:wsp) before image
+	const shapeNode = extractShapeInfo(el);
+	if (shapeNode) return shapeNode;
+
 	const extent = getFirstChild(el, NS.wp, 'extent');
 	const cx = extent ? intOrZero(extent.getAttribute('cx')) : 0;
 	const cy = extent ? intOrZero(extent.getAttribute('cy')) : 0;
@@ -119,6 +128,121 @@ function parseAnchorDrawing(
 
 	const image = createImage(generateId(), imageProps);
 	return createDrawing(generateId(), image, drawingProps);
+}
+
+// ─── Shape Extraction ──────────────────────────────────────────────────────
+
+function extractShapeInfo(el: Element): JPShape | null {
+	const graphic = getFirstChild(el, NS.a, 'graphic');
+	if (!graphic) return null;
+	const graphicData = getFirstChild(graphic, NS.a, 'graphicData');
+	if (!graphicData) return null;
+
+	const wsp = getFirstChild(graphicData, NS.wps, 'wsp');
+	if (!wsp) return null;
+
+	const spPr = getFirstChild(wsp, NS.wps, 'spPr') || getFirstChild(wsp, NS.a, 'spPr');
+	if (!spPr) return null;
+
+	const xfrm = getFirstChild(spPr, NS.a, 'xfrm');
+	const off = xfrm ? getFirstChild(xfrm, NS.a, 'off') : null;
+	const ext = xfrm ? getFirstChild(xfrm, NS.a, 'ext') : null;
+
+	const x = off ? intOrZero(off.getAttribute('x')) : 0;
+	const y = off ? intOrZero(off.getAttribute('y')) : 0;
+	const width = ext ? intOrZero(ext.getAttribute('cx')) : 0;
+	const height = ext ? intOrZero(ext.getAttribute('cy')) : 0;
+
+	const prstGeom = getFirstChild(spPr, NS.a, 'prstGeom');
+	const prst = prstGeom ? prstGeom.getAttribute('prst') : 'rect';
+	const shapeType = mapOoxmlShapeType(prst || 'rect');
+
+	const fill = parseShapeFill(spPr);
+	const stroke = parseShapeStroke(spPr);
+
+	const rot = xfrm ? xfrm.getAttribute('rot') : null;
+	const rotation = rot ? Number.parseInt(rot, 10) / 60000 : undefined;
+
+	const txbxContent = getFirstChild(wsp, NS.wps, 'txbxContent');
+	let text: string | undefined;
+	if (txbxContent) {
+		const texts: string[] = [];
+		const paragraphs = txbxContent.childNodes;
+		for (let i = 0; i < paragraphs.length; i++) {
+			const p = paragraphs[i];
+			if (p.nodeType !== 1) continue;
+			const runs = (p as Element).childNodes;
+			for (let j = 0; j < runs.length; j++) {
+				const r = runs[j];
+				if (r.nodeType !== 1) continue;
+				const re = r as Element;
+				if (re.localName === 'r') {
+					const t = getFirstChild(re, NS.w, 't');
+					if (t) texts.push(textContent(t));
+				}
+			}
+		}
+		if (texts.length > 0) text = texts.join('');
+	}
+
+	return createShape(shapeType, x, y, width, height, { rotation, fill, stroke, text });
+}
+
+function mapOoxmlShapeType(prst: string): JPShapeType {
+	const mapping: Record<string, JPShapeType> = {
+		rect: 'rectangle',
+		roundRect: 'rounded-rectangle',
+		ellipse: 'ellipse',
+		triangle: 'triangle',
+		diamond: 'diamond',
+		pentagon: 'pentagon',
+		hexagon: 'hexagon',
+		star5: 'star',
+		rightArrow: 'arrow-right',
+		leftArrow: 'arrow-left',
+		upArrow: 'arrow-up',
+		downArrow: 'arrow-down',
+		line: 'line',
+		curvedConnector3: 'curved-line',
+		straightConnector1: 'connector',
+		wedgeRoundRectCallout: 'callout',
+		cloudCallout: 'cloud',
+		heart: 'heart',
+	};
+	return mapping[prst] || 'rectangle';
+}
+
+function parseShapeFill(spPr: Element): JPShapeFill | undefined {
+	const solidFill = getFirstChild(spPr, NS.a, 'solidFill');
+	if (solidFill) {
+		const srgbClr = getFirstChild(solidFill, NS.a, 'srgbClr');
+		if (srgbClr) {
+			return { type: 'solid', color: srgbClr.getAttribute('val') || '000000' };
+		}
+		return { type: 'solid', color: '000000' };
+	}
+
+	const noFill = getFirstChild(spPr, NS.a, 'noFill');
+	if (noFill) return { type: 'none' };
+
+	return undefined;
+}
+
+function parseShapeStroke(spPr: Element): JPShapeStroke | undefined {
+	const ln = getFirstChild(spPr, NS.a, 'ln');
+	if (!ln) return undefined;
+
+	const w = ln.getAttribute('w');
+	const width = w ? Number.parseInt(w, 10) : 12700;
+
+	const solidFill = getFirstChild(ln, NS.a, 'solidFill');
+	let color = '000000';
+	if (solidFill) {
+		const srgbClr = getFirstChild(solidFill, NS.a, 'srgbClr');
+		if (srgbClr) color = srgbClr.getAttribute('val') || '000000';
+	}
+
+	return { color, width };
 }
 
 // ─── Image Extraction ──────────────────────────────────────────────────────

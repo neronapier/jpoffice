@@ -4,6 +4,9 @@ import { XmlBuilder } from '../xml/xml-builder';
 /** Information about parts in the DOCX package for content types. */
 export interface PackageParts {
 	readonly hasNumbering: boolean;
+	readonly hasFootnotes?: boolean;
+	readonly hasEndnotes?: boolean;
+	readonly hasComments?: boolean;
 	readonly hasCoreProperties: boolean;
 	readonly mediaFiles: readonly { path: string; mimeType: string }[];
 	readonly headerPaths: readonly string[];
@@ -46,6 +49,27 @@ export function writeContentTypes(parts: PackageParts): string {
 		b.empty('Override', {
 			PartName: '/word/numbering.xml',
 			ContentType: CONTENT_TYPE.numbering,
+		});
+	}
+
+	if (parts.hasFootnotes) {
+		b.empty('Override', {
+			PartName: '/word/footnotes.xml',
+			ContentType: CONTENT_TYPE.footnotes,
+		});
+	}
+
+	if (parts.hasEndnotes) {
+		b.empty('Override', {
+			PartName: '/word/endnotes.xml',
+			ContentType: CONTENT_TYPE.endnotes,
+		});
+	}
+
+	if (parts.hasComments) {
+		b.empty('Override', {
+			PartName: '/word/comments.xml',
+			ContentType: CONTENT_TYPE.comments,
 		});
 	}
 

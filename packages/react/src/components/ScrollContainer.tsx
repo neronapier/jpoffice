@@ -1,17 +1,27 @@
 'use client';
 
-import type { CSSProperties, ReactNode } from 'react';
+import type { AriaRole, CSSProperties, ReactNode } from 'react';
 
 export interface ScrollContainerProps {
 	children: ReactNode;
 	className?: string;
 	style?: CSSProperties;
+	role?: AriaRole;
+	'aria-label'?: string;
 }
 
-export function ScrollContainer({ children, className, style }: ScrollContainerProps) {
+export function ScrollContainer({
+	children,
+	className,
+	style,
+	role,
+	'aria-label': ariaLabel,
+}: ScrollContainerProps) {
 	return (
 		<div
 			className={className}
+			role={role}
+			aria-label={ariaLabel}
 			style={{
 				display: 'flex',
 				flexDirection: 'column',

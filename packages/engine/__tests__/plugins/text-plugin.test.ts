@@ -300,15 +300,44 @@ describe('TextPlugin', () => {
 	});
 
 	describe('text.insertTab', () => {
-		it('inserts tab character', () => {
+		it('increases paragraph indent when no list or table context', () => {
 			const editor = createEditor('Hello');
+			// Register format.indent command so Tab can delegate to it
+			editor.registerCommand<{ direction: string }>({
+				id: 'format.indent',
+				name: 'Indent',
+				canExecute: () => true,
+				execute: (_ed, args) => {
+					// Apply indent to paragraph
+					const sel = editor.getSelection()!;
+					const paraPath = sel.anchor.path.slice(0, 3);
+					const doc = editor.getDocument();
+					const para = getNodeAtPath(doc, paraPath);
+					const props = (para as { properties?: { indent?: { left?: number } } }).properties ?? {};
+					const currentLeft = props.indent?.left ?? 0;
+					const step = 720;
+					const newLeft = args.direction === 'increase' ? currentLeft + step : Math.max(0, currentLeft - step);
+					editor.apply({
+						type: 'set_properties',
+						path: paraPath,
+						properties: { indent: { left: newLeft } },
+						oldProperties: { indent: props.indent },
+					});
+				},
+			});
+
 			editor.setSelection({
 				anchor: { path: TEXT_PATH, offset: 5 },
 				focus: { path: TEXT_PATH, offset: 5 },
 			});
 
 			editor.executeCommand('text.insertTab');
-			expect(getTextAt(editor, TEXT_PATH)).toBe('Hello\t');
+			// Text should NOT have a tab character inserted
+			expect(getTextAt(editor, TEXT_PATH)).toBe('Hello');
+			// Paragraph should have increased indent
+			const paraPath = TEXT_PATH.slice(0, 3);
+			const para = getNodeAtPath(editor.getDocument(), paraPath) as { properties: { indent?: { left?: number } } };
+			expect(para.properties.indent?.left).toBe(720);
 		});
 	});
 });

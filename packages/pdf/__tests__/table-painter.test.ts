@@ -1,7 +1,7 @@
-import { describe, it, expect } from 'vitest';
-import { TablePainter } from '../src/table-painter';
-import { ContentStreamBuilder } from '../src/content-stream';
 import type { LayoutTable, LayoutTableCell, LayoutTableRow } from '@jpoffice/layout';
+import { describe, expect, it } from 'vitest';
+import { ContentStreamBuilder } from '../src/content-stream';
+import { TablePainter } from '../src/table-painter';
 
 function makeCell(overrides: Partial<LayoutTableCell> = {}): LayoutTableCell {
 	return {
@@ -65,8 +65,14 @@ describe('TablePainter', () => {
 		painter.paintCellBorder(cell, 0, 0);
 
 		const result = stream.build();
-		expect(result).toContain('re');
+		// Cell borders are painted as individual lines (moveTo + lineTo + stroke)
+		// for each side (top, bottom, left, right)
+		expect(result).toContain('m');
+		expect(result).toContain('l');
 		expect(result).toContain('S');
+		// 4 border sides = 4 stroke operations
+		const strokeCount = (result.match(/\bS\b/g) || []).length;
+		expect(strokeCount).toBe(4);
 	});
 
 	it('paints cell background when shading is set', () => {
@@ -120,8 +126,9 @@ describe('TablePainter', () => {
 		painter.paintTableCells(table, 0, 0);
 
 		const result = stream.build();
-		// Should have multiple rect+stroke operations (one per cell)
+		// Should have 4 border lines per cell (top, bottom, left, right)
+		// 2 cells x 4 borders = 8 stroke operations
 		const strokeCount = (result.match(/\bS\b/g) || []).length;
-		expect(strokeCount).toBe(2);
+		expect(strokeCount).toBe(8);
 	});
 });

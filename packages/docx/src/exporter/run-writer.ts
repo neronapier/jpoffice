@@ -43,6 +43,63 @@ export function writeRunProperties(b: XmlBuilder, props: JPRunProperties): void 
 	}
 	if (props.language) b.empty('w:lang', { 'w:val': props.language });
 
+	// Write w:rPrChange for format change revisions
+	if (props.revision?.type === 'formatChange') {
+		b.open('w:rPrChange', {
+			'w:id': props.revision.revisionId,
+			'w:author': props.revision.author,
+			'w:date': props.revision.date,
+		});
+		if (props.previousProperties && Object.keys(props.previousProperties).length > 0) {
+			writeRunPropertiesInner(b, props.previousProperties);
+		} else {
+			b.open('w:rPr');
+			b.close();
+		}
+		b.close(); // w:rPrChange
+	}
+
+	b.close(); // w:rPr
+}
+
+/**
+ * Write inner w:rPr elements without the outer tag.
+ * Used by w:rPrChange to serialize the previous formatting state.
+ */
+function writeRunPropertiesInner(b: XmlBuilder, props: Partial<JPRunProperties>): void {
+	b.open('w:rPr');
+	if (props.styleId) b.empty('w:rStyle', { 'w:val': props.styleId });
+	if (props.bold) b.empty('w:b');
+	if (props.italic) b.empty('w:i');
+	if (props.underline && props.underline !== 'none') {
+		b.empty('w:u', { 'w:val': props.underline });
+	}
+	if (props.strikethrough) b.empty('w:strike');
+	if (props.doubleStrikethrough) b.empty('w:dstrike');
+	if (props.superscript) b.empty('w:vertAlign', { 'w:val': 'superscript' });
+	if (props.subscript) b.empty('w:vertAlign', { 'w:val': 'subscript' });
+	if (props.fontFamily) {
+		b.empty('w:rFonts', {
+			'w:ascii': props.fontFamily,
+			'w:hAnsi': props.fontFamily,
+			'w:cs': props.fontFamily,
+		});
+	}
+	if (props.fontSize !== undefined) {
+		b.empty('w:sz', { 'w:val': props.fontSize });
+		b.empty('w:szCs', { 'w:val': props.fontSize });
+	}
+	if (props.color) b.empty('w:color', { 'w:val': props.color });
+	if (props.highlight) b.empty('w:highlight', { 'w:val': props.highlight });
+	if (props.backgroundColor) {
+		b.empty('w:shd', { 'w:val': 'clear', 'w:fill': props.backgroundColor });
+	}
+	if (props.allCaps) b.empty('w:caps');
+	if (props.smallCaps) b.empty('w:smallCaps');
+	if (props.letterSpacing !== undefined) {
+		b.empty('w:spacing', { 'w:val': props.letterSpacing });
+	}
+	if (props.language) b.empty('w:lang', { 'w:val': props.language });
 	b.close(); // w:rPr
 }
 

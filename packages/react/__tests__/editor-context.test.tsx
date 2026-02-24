@@ -1,17 +1,17 @@
-import { describe, it, expect, afterEach } from 'vitest';
-import React, { useContext } from 'react';
-import { render, screen, cleanup } from '@testing-library/react';
+import { JPEditor } from '@jpoffice/engine';
 import {
-	createDocument,
+	DEFAULT_SECTION_PROPERTIES,
 	createBody,
-	createSection,
+	createDocument,
 	createParagraph,
 	createRun,
+	createSection,
 	createText,
 	generateId,
-	DEFAULT_SECTION_PROPERTIES,
 } from '@jpoffice/model';
-import { JPEditor } from '@jpoffice/engine';
+import { cleanup, render, screen } from '@testing-library/react';
+import { useContext } from 'react';
+import { afterEach, describe, expect, it } from 'vitest';
 import { EditorContext } from '../src/context/editor-context';
 import type { EditorContextValue } from '../src/context/editor-context';
 

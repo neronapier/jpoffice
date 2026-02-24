@@ -3,6 +3,12 @@ import { isLayoutParagraph, isLayoutTable } from '@jpoffice/layout';
 import type { JPPath, JPSelection } from '@jpoffice/model';
 import { comparePaths, pathEquals } from '@jpoffice/model';
 
+export interface SearchHighlight {
+	readonly path: JPPath;
+	readonly offset: number;
+	readonly length: number;
+}
+
 export interface SelectionStyle {
 	/** Fill color for selection highlight. Default 'rgba(51,144,255,0.3)'. */
 	color?: string;
@@ -114,6 +120,73 @@ export class SelectionRenderer {
 				);
 			}
 		}
+	}
+
+	/**
+	 * Render search match highlights on a page.
+	 */
+	renderSearchHighlights(
+		ctx: CanvasRenderingContext2D,
+		page: LayoutPage,
+		highlights: readonly SearchHighlight[],
+		currentIndex: number,
+		pageOffsetX: number,
+		pageOffsetY: number,
+	): void {
+		if (highlights.length === 0) return;
+
+		ctx.save();
+
+		for (let hi = 0; hi < highlights.length; hi++) {
+			const h = highlights[hi];
+			const isCurrent = hi === currentIndex;
+			ctx.fillStyle = isCurrent ? 'rgba(255, 152, 0, 0.5)' : 'rgba(255, 235, 59, 0.4)';
+
+			const anchorPath = h.path;
+			const anchorOffset = h.offset;
+			const focusPath = h.path;
+			const focusOffset = h.offset + h.length;
+
+			for (const block of page.blocks) {
+				if (isLayoutParagraph(block)) {
+					for (const line of block.lines) {
+						this.highlightLineFragments(
+							ctx,
+							line,
+							anchorPath,
+							anchorOffset,
+							focusPath,
+							focusOffset,
+							pageOffsetX + block.rect.x,
+							pageOffsetY + block.rect.y,
+						);
+					}
+				} else if (isLayoutTable(block)) {
+					for (const row of block.rows) {
+						for (const cell of row.cells) {
+							for (const cellBlock of cell.blocks) {
+								if (isLayoutParagraph(cellBlock)) {
+									for (const line of cellBlock.lines) {
+										this.highlightLineFragments(
+											ctx,
+											line,
+											anchorPath,
+											anchorOffset,
+											focusPath,
+											focusOffset,
+											pageOffsetX + cell.contentRect.x + cellBlock.rect.x,
+											pageOffsetY + cell.contentRect.y + cellBlock.rect.y,
+										);
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+
+		ctx.restore();
 	}
 
 	private getSelectionRectsForFragment(

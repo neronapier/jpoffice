@@ -1,14 +1,14 @@
 'use client';
 
 import {
-	createDocument,
+	DEFAULT_SECTION_PROPERTIES,
 	createBody,
-	createSection,
+	createDocument,
 	createParagraph,
 	createRun,
+	createSection,
 	createText,
 	generateId,
-	DEFAULT_SECTION_PROPERTIES,
 } from '@jpoffice/model';
 import { JPOfficeEditor } from '@jpoffice/react';
 
@@ -52,30 +52,21 @@ export default function Page() {
 
 	return (
 		<div style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
-			<header
-				style={{
-					padding: '12px 24px',
-					borderBottom: '1px solid #e0e0e0',
-					backgroundColor: '#fff',
+			<JPOfficeEditor
+				document={doc}
+				showMenuBar
+				showTitleBar
+				title="JPOffice Demo"
+				style={{ height: '100%' }}
+				onEditorReady={(editor) => {
+					console.log('Editor ready:', editor);
+					const sel = {
+						anchor: { path: [0, 0, 2, 0, 0], offset: 0 },
+						focus: { path: [0, 0, 2, 0, 0], offset: 0 },
+					};
+					editor.setSelection(sel);
 				}}
-			>
-				<h1 style={{ margin: 0, fontSize: 20, fontWeight: 600 }}>JPOffice</h1>
-			</header>
-			<main style={{ flex: 1, overflow: 'hidden' }}>
-				<JPOfficeEditor
-					document={doc}
-					style={{ height: '100%' }}
-					onEditorReady={(editor) => {
-						console.log('Editor ready:', editor);
-						// Set initial cursor at the end of the empty paragraph
-						const sel = {
-							anchor: { path: [0, 0, 2, 0, 0], offset: 0 },
-							focus: { path: [0, 0, 2, 0, 0], offset: 0 },
-						};
-						editor.setSelection(sel);
-					}}
-				/>
-			</main>
+			/>
 		</div>
 	);
 }

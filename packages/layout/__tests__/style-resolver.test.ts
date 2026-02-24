@@ -1,6 +1,6 @@
-import { describe, it, expect } from 'vitest';
 import { createStyleRegistry } from '@jpoffice/model';
-import { resolveRunStyle, resolveParagraphLayout } from '../src/style-resolver';
+import { describe, expect, it } from 'vitest';
+import { resolveParagraphLayout, resolveRunStyle } from '../src/style-resolver';
 
 const emptyStyles = createStyleRegistry([]);
 
@@ -22,11 +22,15 @@ describe('resolveRunStyle', () => {
 	});
 
 	it('applies direct run properties', () => {
-		const style = resolveRunStyle(emptyStyles, {}, {
-			bold: true,
-			italic: true,
-			fontFamily: 'Arial',
-		});
+		const style = resolveRunStyle(
+			emptyStyles,
+			{},
+			{
+				bold: true,
+				italic: true,
+				fontFamily: 'Arial',
+			},
+		);
 		expect(style.bold).toBe(true);
 		expect(style.italic).toBe(true);
 		expect(style.fontFamily).toBe('Arial');
@@ -59,11 +63,7 @@ describe('resolveRunStyle', () => {
 	});
 
 	it('direct run properties override paragraph defaults', () => {
-		const style = resolveRunStyle(
-			emptyStyles,
-			{ runProperties: { bold: true } },
-			{ bold: false },
-		);
+		const style = resolveRunStyle(emptyStyles, { runProperties: { bold: true } }, { bold: false });
 		expect(style.bold).toBe(false);
 	});
 });

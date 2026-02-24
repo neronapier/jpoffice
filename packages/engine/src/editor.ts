@@ -1,12 +1,21 @@
-import type { JPDocument, JPOperation, JPSelection } from '@jpoffice/model';
+import type {
+	JPDocument,
+	JPOperation,
+	JPParagraphProperties,
+	JPRunProperties,
+	JPSelection,
+	JPStyleRegistry,
+} from '@jpoffice/model';
 import { applyOperation } from '@jpoffice/model';
 import type { JPCommand } from './commands/command';
 import { JPCommandRegistry } from './commands/registry';
 import type { JPEditorState } from './editor-state';
 import { createEditorState } from './editor-state';
 import { canRedo, canUndo, performRedo, performUndo, pushToHistory } from './history/history';
+import type { FormattingPlugin } from './plugins/formatting/formatting-plugin';
 import type { JPPlugin } from './plugins/plugin';
 import { JPPluginManager } from './plugins/plugin-manager';
+import { resolveSelectionContext } from './plugins/text/text-utils';
 import { SelectionManager } from './selection/selection-manager';
 
 export type JPEditorListener = (state: JPEditorState) => void;
@@ -219,6 +228,33 @@ export class JPEditor {
 		return SelectionManager.getSelectedText(this.state.document, this.state.selection);
 	}
 
+	/**
+	 * Return the effective run + paragraph formatting at the current cursor position.
+	 * Merges pending marks (from collapsed cursor formatting toggles) on top of the
+	 * run properties so the toolbar can reflect the "next character" style.
+	 */
+	getFormatAtCursor(): {
+		run: Partial<JPRunProperties>;
+		paragraph: Partial<JPParagraphProperties>;
+	} | null {
+		const sel = this.state.selection;
+		if (!sel) return null;
+		const doc = this.state.document;
+		try {
+			const ctx = resolveSelectionContext(doc, sel.anchor);
+			const formattingPlugin = this.getPlugin('jpoffice.formatting') as
+				| FormattingPlugin
+				| undefined;
+			const pendingMarks = formattingPlugin?.getPendingMarks();
+			return {
+				run: { ...ctx.run.properties, ...(pendingMarks ?? {}) },
+				paragraph: ctx.paragraph.properties,
+			};
+		} catch {
+			return null;
+		}
+	}
+
 	// ── Commands ──────────────────────────────────────────────
 
 	registerCommand<TArgs>(command: JPCommand<TArgs>): void {
@@ -257,6 +293,51 @@ export class JPEditor {
 		if (this.state.readOnly === readOnly) return;
 		this.state = { ...this.state, readOnly };
 		this.notify();
+	}
+
+	// ── Document Metadata Updates ────────────────────────────
+
+	/**
+	 * Update the document's style registry without resetting history or selection.
+	 * Used by the StylesPlugin for creating, modifying, renaming, and deleting styles.
+	 */
+	updateDocumentStyles(styles: JPStyleRegistry): void {
+		if (this.state.readOnly) return;
+		const newDoc: JPDocument = { ...this.state.document, styles };
+		this.state = { ...this.state, document: newDoc };
+		this.notify();
+	}
+
+	// ── Document Replacement ─────────────────────────────────
+
+	/**
+	 * Replace the entire document, resetting history, selection, and plugin state.
+	 * Used when loading a new file or creating a new document.
+	 */
+	setDocument(document: JPDocument, options?: { selection?: JPSelection }): void {
+		const cursorPath = this.findFirstTextPath(document);
+		const defaultPoint = cursorPath ? { path: cursorPath, offset: 0 } : null;
+		const selection =
+			options?.selection ?? (defaultPoint ? { anchor: defaultPoint, focus: defaultPoint } : null);
+
+		this.pluginManager.resetAll(this);
+
+		this.state = createEditorState(document, {
+			selection,
+			readOnly: this.state.readOnly,
+		});
+
+		this.notify();
+	}
+
+	private findFirstTextPath(doc: JPDocument): readonly number[] | null {
+		let node: { children?: readonly unknown[] } = doc;
+		const path: number[] = [];
+		while (node.children && (node.children as readonly unknown[]).length > 0) {
+			path.push(0);
+			node = (node.children as readonly { children?: readonly unknown[] }[])[0];
+		}
+		return path.length > 0 ? path : null;
 	}
 
 	// ── Cleanup ───────────────────────────────────────────────

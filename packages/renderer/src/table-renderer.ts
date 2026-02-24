@@ -1,5 +1,6 @@
 import type { LayoutTable, LayoutTableCell } from '@jpoffice/layout';
 import { isLayoutParagraph } from '@jpoffice/layout';
+import type { JPBorderDef } from '@jpoffice/model';
 import type { TextRenderer } from './text-renderer';
 
 /**
@@ -58,12 +59,35 @@ export class TableRenderer {
 			}
 		}
 
-		// Cell border
+		// Cell borders
+		const cx = offsetX + cell.x;
+		const cy = offsetY + cell.y;
+		const cw = cell.width;
+		const ch = cell.height;
+
 		ctx.save();
-		ctx.strokeStyle = '#000000';
-		ctx.lineWidth = 0.5;
-		ctx.strokeRect(offsetX + cell.x, offsetY + cell.y, cell.width, cell.height);
+		this.drawBorder(ctx, cell.borders?.top, cx, cy, cx + cw, cy);
+		this.drawBorder(ctx, cell.borders?.bottom, cx, cy + ch, cx + cw, cy + ch);
+		this.drawBorder(ctx, cell.borders?.left, cx, cy, cx, cy + ch);
+		this.drawBorder(ctx, cell.borders?.right, cx + cw, cy, cx + cw, cy + ch);
 		ctx.restore();
+	}
+
+	private drawBorder(
+		ctx: CanvasRenderingContext2D,
+		border: JPBorderDef | undefined,
+		x1: number,
+		y1: number,
+		x2: number,
+		y2: number,
+	): void {
+		if (border && border.style === 'none') return;
+		ctx.strokeStyle = border?.color ? `#${border.color}` : '#000000';
+		ctx.lineWidth = border?.width ? border.width / 8 : 0.5;
+		ctx.beginPath();
+		ctx.moveTo(x1, y1);
+		ctx.lineTo(x2, y2);
+		ctx.stroke();
 	}
 
 	private renderBorders(
@@ -72,10 +96,16 @@ export class TableRenderer {
 		offsetX: number,
 		offsetY: number,
 	): void {
+		const tx = offsetX + table.x;
+		const ty = offsetY + table.y;
+		const tw = table.width;
+		const th = table.height;
+
 		ctx.save();
-		ctx.strokeStyle = '#000000';
-		ctx.lineWidth = 1;
-		ctx.strokeRect(offsetX + table.x, offsetY + table.y, table.width, table.height);
+		this.drawBorder(ctx, table.borders?.top, tx, ty, tx + tw, ty);
+		this.drawBorder(ctx, table.borders?.bottom, tx, ty + th, tx + tw, ty + th);
+		this.drawBorder(ctx, table.borders?.left, tx, ty, tx, ty + th);
+		this.drawBorder(ctx, table.borders?.right, tx + tw, ty, tx + tw, ty + th);
 		ctx.restore();
 	}
 }

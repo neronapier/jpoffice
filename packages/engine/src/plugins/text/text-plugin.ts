@@ -69,6 +69,13 @@ export class TextPlugin implements JPPlugin {
 		});
 
 		editor.registerCommand({
+			id: 'text.shiftTab',
+			name: 'Shift Tab',
+			canExecute: () => !editor.isReadOnly() && editor.getSelection() !== null,
+			execute: () => this.handleShiftTab(editor),
+		});
+
+		editor.registerCommand({
 			id: 'text.deleteSelection',
 			name: 'Delete Selection',
 			canExecute: () => {
@@ -76,6 +83,13 @@ export class TextPlugin implements JPPlugin {
 				return !editor.isReadOnly() && sel !== null && !SelectionManager.isCollapsed(sel);
 			},
 			execute: () => this.deleteSelection(editor),
+		});
+
+		editor.registerCommand({
+			id: 'text.insertPageBreak',
+			name: 'Insert Page Break',
+			canExecute: () => !editor.isReadOnly() && editor.getSelection() !== null,
+			execute: () => this.insertPageBreak(editor),
 		});
 	}
 
@@ -403,14 +417,44 @@ export class TextPlugin implements JPPlugin {
 		const sel = editor.getSelection();
 		if (!sel) return;
 
-		// Check if in a list — delegate to list.indent
+		// Priority 1: Table cell navigation
+		if (editor.canExecuteCommand('table.navigateNext')) {
+			editor.executeCommand('table.navigateNext');
+			return;
+		}
+
+		// Priority 2: List indent
 		if (editor.canExecuteCommand('list.indent')) {
 			editor.executeCommand('list.indent');
 			return;
 		}
 
-		// Otherwise insert a tab character
-		this.insertText(editor, '\t');
+		// Priority 3: Increase paragraph indent (Google Docs behavior)
+		if (editor.canExecuteCommand('format.indent')) {
+			editor.executeCommand('format.indent', { direction: 'increase' });
+		}
+	}
+
+	private handleShiftTab(editor: JPEditor): void {
+		const sel = editor.getSelection();
+		if (!sel) return;
+
+		// Priority 1: Table cell navigation (previous)
+		if (editor.canExecuteCommand('table.navigatePrev')) {
+			editor.executeCommand('table.navigatePrev');
+			return;
+		}
+
+		// Priority 2: List outdent
+		if (editor.canExecuteCommand('list.outdent')) {
+			editor.executeCommand('list.outdent');
+			return;
+		}
+
+		// Priority 3: Decrease paragraph indent
+		if (editor.canExecuteCommand('format.indent')) {
+			editor.executeCommand('format.indent', { direction: 'decrease' });
+		}
 	}
 
 	private deleteSelection(editor: JPEditor): void {
@@ -421,6 +465,29 @@ export class TextPlugin implements JPPlugin {
 			const { ops, collapsedPoint } = deleteSelectionOps(editor.getDocument(), sel);
 			for (const op of ops) editor.apply(op);
 			editor.setSelection({ anchor: collapsedPoint, focus: collapsedPoint });
+		});
+	}
+
+	private insertPageBreak(editor: JPEditor): void {
+		const sel = editor.getSelection();
+		if (!sel) return;
+
+		editor.batch(() => {
+			// First insert a new paragraph (reuses existing logic)
+			this.insertParagraph(editor);
+
+			// Now set pageBreakBefore on the new paragraph where the cursor landed
+			const newSel = editor.getSelection();
+			if (!newSel) return;
+			const doc = editor.getDocument();
+			const ctx = resolveSelectionContext(doc, newSel.anchor);
+
+			editor.apply({
+				type: 'set_properties',
+				path: ctx.paragraphPath,
+				properties: { pageBreakBefore: true },
+				oldProperties: { pageBreakBefore: ctx.paragraph.properties.pageBreakBefore },
+			});
 		});
 	}
 }

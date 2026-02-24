@@ -1,7 +1,7 @@
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
+import type { PositionedFloat } from '../src/float-layout';
 import { breakIntoLines } from '../src/line-breaker';
 import type { InlineItem } from '../src/line-breaker';
-import type { PositionedFloat } from '../src/float-layout';
 import { TextMeasurer } from '../src/text-measurer';
 import type { ResolvedRunStyle } from '../src/types';
 
@@ -144,8 +144,17 @@ describe('breakIntoLines', () => {
 
 			const withoutFloat = breakIntoLines(items, measurer, 500, 0, 'left', 1.0, [0, 0], 0);
 			const withFloat = breakIntoLines(
-				items, measurer, 500, 0, 'left', 1.0, [0, 0], 0,
-				[float], 0, 500,
+				items,
+				measurer,
+				500,
+				0,
+				'left',
+				1.0,
+				[0, 0],
+				0,
+				[float],
+				0,
+				500,
 			);
 
 			// With float, lines should have less width or different X
@@ -163,8 +172,17 @@ describe('breakIntoLines', () => {
 			});
 
 			const lines = breakIntoLines(
-				items, measurer, 500, 0, 'left', 1.0, [0, 0], 0,
-				[float], 0, 500,
+				items,
+				measurer,
+				500,
+				0,
+				'left',
+				1.0,
+				[0, 0],
+				0,
+				[float],
+				0,
+				500,
 			);
 
 			// First line should start at or after the float bottom (50)
@@ -177,8 +195,17 @@ describe('breakIntoLines', () => {
 			const float = makeFloat({ x: 0, y: 0, width: 100, height: 30 });
 
 			const lines = breakIntoLines(
-				items, measurer, 500, 0, 'left', 1.0, [0, 0], 100,
-				[float], 0, 500,
+				items,
+				measurer,
+				500,
+				0,
+				'left',
+				1.0,
+				[0, 0],
+				100,
+				[float],
+				0,
+				500,
 			);
 
 			// Line starts at y=100, well below float — should not be affected
@@ -188,10 +215,7 @@ describe('breakIntoLines', () => {
 		it('works with no floats (backward compatible)', () => {
 			const items: InlineItem[] = [makeItem('Hello')];
 			const withUndefined = breakIntoLines(items, measurer, 500, 0, 'left', 1.0, [0, 0], 0);
-			const withEmpty = breakIntoLines(
-				items, measurer, 500, 0, 'left', 1.0, [0, 0], 0,
-				[], 0, 500,
-			);
+			const withEmpty = breakIntoLines(items, measurer, 500, 0, 'left', 1.0, [0, 0], 0, [], 0, 500);
 			expect(withUndefined[0].rect.width).toBe(withEmpty[0].rect.width);
 		});
 	});

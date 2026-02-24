@@ -32,6 +32,12 @@ export interface JPPlugin {
 	normalize?(editor: JPEditor, node: JPNode, path: JPPath): JPOperation[] | null;
 
 	/**
+	 * Called when the document is replaced (e.g., loading a new file).
+	 * Plugins should reset any internal state that references the old document.
+	 */
+	reset?(editor: JPEditor): void;
+
+	/**
 	 * Cleanup when plugin is removed.
 	 */
 	destroy?(): void;

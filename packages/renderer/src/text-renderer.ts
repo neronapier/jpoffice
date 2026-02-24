@@ -12,7 +12,7 @@ export class TextRenderer {
 		if (style.italic) parts.push('italic');
 		if (style.bold) parts.push('bold');
 		parts.push(`${style.fontSize}px`);
-		parts.push(style.fontFamily);
+		parts.push(`"${style.fontFamily}", sans-serif`);
 		return parts.join(' ');
 	}
 

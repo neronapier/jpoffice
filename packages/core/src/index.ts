@@ -20,4 +20,42 @@ export * from '@jpoffice/react';
 export * from '@jpoffice/docx';
 
 // PDF export
-export * from '@jpoffice/pdf';
+export {
+	exportToPdf,
+	PdfDocument,
+	PdfWriter,
+	ContentStreamBuilder,
+	FontRegistry,
+	buildFontKey,
+	ImageEmbedder,
+	TextPainter,
+	TablePainter,
+	pxToPt,
+	flipY,
+	colorToRgb,
+	escapePdfString,
+	round,
+	collectLinkAnnotations,
+	writeLinkAnnotations,
+	collectOutlineEntries,
+	writeOutlines,
+	subsetFont,
+	writeCidFont,
+	generateToUnicodeCMap,
+	nodeTypeToTag,
+	writeStructureTree,
+	buildBlockMcidMap,
+	McidCounter,
+} from '@jpoffice/pdf';
+export type {
+	PdfExportOptions,
+	PdfFontInfo,
+	GlyphMappings,
+	LinkAnnotation,
+	OutlineEntry as PdfOutlineEntry,
+	SubsetResult,
+	PdfFontMetrics,
+	CidFontResult,
+	PdfStructureTag,
+	StructureTreeResult,
+} from '@jpoffice/pdf';

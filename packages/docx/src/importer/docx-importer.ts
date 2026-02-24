@@ -6,11 +6,14 @@ import {
 	createStyleRegistry,
 	generateId,
 } from '@jpoffice/model';
+import { parseComments } from './comment-parser';
 import { parseDocument } from './document-parser';
 import { readDocxPackage } from './docx-reader';
+import { parseFootnotes } from './footnote-parser';
 import { parseNumbering } from './numbering-parser';
 import { parseRelationships } from './relationships-parser';
 import { parseStyles } from './styles-parser';
+import { parseTheme } from './theme-parser';
 
 /** Options for DOCX import. */
 export interface DocxImportOptions {
@@ -36,14 +39,29 @@ export function importDocx(data: Uint8Array, _options?: DocxImportOptions): JPDo
 	const stylesXml = pkg.xml.get('word/styles.xml');
 	const styles = stylesXml ? parseStyles(stylesXml) : createStyleRegistry([]);
 
+	// 3b. Parse theme
+	const themeXml = pkg.xml.get('word/theme/theme1.xml');
+	const themeColors = themeXml ? parseTheme(themeXml) : undefined;
+
 	// 4. Parse numbering
 	const numberingXml = pkg.xml.get('word/numbering.xml');
 	const numbering = numberingXml ? parseNumbering(numberingXml) : EMPTY_NUMBERING_REGISTRY;
 
-	// 5. Parse document body, headers, footers, media, metadata
+	// 5. Parse comments
+	const commentsXml = pkg.xml.get('word/comments.xml');
+	const comments = commentsXml ? parseComments(commentsXml) : [];
+
+	// 6. Parse footnotes and endnotes
+	const footnotesXml = pkg.xml.get('word/footnotes.xml');
+	const footnotes = footnotesXml ? parseFootnotes(footnotesXml, 'footnote') : [];
+
+	const endnotesXml = pkg.xml.get('word/endnotes.xml');
+	const endnotes = endnotesXml ? parseFootnotes(endnotesXml, 'endnote') : [];
+
+	// 7. Parse document body, headers, footers, media, metadata
 	const { sections, headers, footers, media, metadata } = parseDocument(pkg, docRels);
 
-	// 6. Convert media bag to JPMediaAsset map
+	// 8. Convert media bag to JPMediaAsset map
 	const mediaAssets = new Map<string, JPMediaAsset>();
 	for (const [_path, info] of media) {
 		const assetId = generateId();
@@ -55,7 +73,7 @@ export function importDocx(data: Uint8Array, _options?: DocxImportOptions): JPDo
 		});
 	}
 
-	// 7. Assemble the JPDocument
+	// 9. Assemble the JPDocument
 	const body = createBody(generateId(), sections);
 	return createDocument({
 		id: generateId(),
@@ -66,5 +84,9 @@ export function importDocx(data: Uint8Array, _options?: DocxImportOptions): JPDo
 		media: mediaAssets,
 		headers,
 		footers,
+		comments,
+		footnotes,
+		endnotes,
+		themeColors: themeColors as Record<string, string> | undefined,
 	});
 }

@@ -1,6 +1,10 @@
 /**
  * Converts LayoutFragment objects into PDF text operators.
  * Mirrors the Canvas TextRenderer but outputs PDF content stream operations.
+ *
+ * Supports two text encoding modes:
+ * - Standard 14 fonts: literal string encoding (ASCII only)
+ * - CID embedded fonts: hex string encoding (full Unicode)
  */
 
 import type { LayoutFragment, LayoutLine } from '@jpoffice/layout';
@@ -8,12 +12,56 @@ import type { ContentStreamBuilder } from './content-stream';
 import type { FontRegistry } from './font-map';
 import { colorToRgb, escapePdfString, flipY, pxToPt, round } from './unit-utils';
 
+/**
+ * Check if a string contains RTL characters (Arabic/Hebrew Unicode ranges).
+ */
+function containsRtlChars(text: string): boolean {
+	for (let i = 0; i < text.length; i++) {
+		const cp = text.codePointAt(i);
+		if (cp === undefined) continue;
+		// Hebrew: U+0590-U+05FF, Arabic: U+0600-U+06FF, Arabic Supplement: U+0750-U+077F,
+		// Arabic Extended: U+08A0-U+08FF
+		if (
+			(cp >= 0x0590 && cp <= 0x05ff) ||
+			(cp >= 0x0600 && cp <= 0x06ff) ||
+			(cp >= 0x0700 && cp <= 0x074f) ||
+			(cp >= 0x0750 && cp <= 0x077f) ||
+			(cp >= 0x0780 && cp <= 0x07bf) ||
+			(cp >= 0x07c0 && cp <= 0x07ff) ||
+			(cp >= 0x0800 && cp <= 0x083f) ||
+			(cp >= 0x08a0 && cp <= 0x08ff)
+		) {
+			return true;
+		}
+		if (cp > 0xffff) i++; // skip surrogate pair
+	}
+	return false;
+}
+
+/**
+ * Reverse the character order of a string for RTL display.
+ * Handles surrogate pairs correctly.
+ */
+function reverseString(str: string): string {
+	const chars = Array.from(str);
+	chars.reverse();
+	return chars.join('');
+}
+
+/** Maps font keys to glyph mappings for CID text encoding. */
+export type GlyphMappings = ReadonlyMap<string, ReadonlyMap<number, number>>;
+
 export class TextPainter {
+	private glyphMappings: GlyphMappings;
+
 	constructor(
 		private stream: ContentStreamBuilder,
 		private fonts: FontRegistry,
 		private pageHeightPt: number,
-	) {}
+		glyphMappings?: GlyphMappings,
+	) {
+		this.glyphMappings = glyphMappings ?? new Map();
+	}
 
 	/** Paint all fragments in a line. */
 	paintLine(line: LayoutLine, offsetX: number, offsetY: number): void {
@@ -24,6 +72,22 @@ export class TextPainter {
 			this.paintFragment(fragment, line, offsetX, offsetY);
 			this.paintDecorations(fragment, line, offsetX, offsetY);
 		}
+	}
+
+	/**
+	 * Begin a marked content sequence for accessibility tagging.
+	 * Call this before painting a paragraph's lines to wrap them with BDC/EMC.
+	 */
+	beginMarkedContent(tag: string, mcid: number): void {
+		this.stream.beginMarkedContent(tag, mcid);
+	}
+
+	/**
+	 * End a marked content sequence.
+	 * Call this after painting all lines of a paragraph.
+	 */
+	endMarkedContent(): void {
+		this.stream.endMarkedContent();
 	}
 
 	/** Paint a single text fragment. */
@@ -41,6 +105,13 @@ export class TextPainter {
 			displayText = displayText.toUpperCase();
 		}
 
+		// RTL text handling: if the text contains RTL characters,
+		// reverse character order for correct display in PDF
+		const isRtl = containsRtlChars(displayText);
+		if (isRtl) {
+			displayText = reverseString(displayText);
+		}
+
 		let fontSize = pxToPt(style.fontSize);
 		let yAdjust = 0;
 
@@ -54,7 +125,14 @@ export class TextPainter {
 
 		const fontInfo = this.fonts.getFont(style.fontFamily, style.bold, style.italic);
 
-		const x = pxToPt(offsetX + rect.x);
+		// For RTL text, adjust x-position to right-align within the fragment's allocated space
+		let x: number;
+		if (isRtl) {
+			// Right-align: position text so it ends at the right edge of the rect
+			x = pxToPt(offsetX + rect.x + rect.width) - this.estimateTextWidth(displayText, fontSize);
+		} else {
+			x = pxToPt(offsetX + rect.x);
+		}
 		const baselineY = pxToPt(offsetY + line.rect.y + line.baseline);
 		const pdfY = flipY(baselineY, this.pageHeightPt) + yAdjust;
 
@@ -64,9 +142,18 @@ export class TextPainter {
 			.beginText()
 			.setFont(fontInfo.pdfName, round(fontSize))
 			.setFillColor(r, g, b)
-			.setTextPosition(round(x), round(pdfY))
-			.showText(escapePdfString(displayText))
-			.endText();
+			.setTextPosition(round(x), round(pdfY));
+
+		if (fontInfo.isCidFont && fontInfo.fontKey) {
+			// CID font: encode as hex string using glyph mapping
+			const hexStr = this.encodeTextAsHex(displayText, fontInfo.fontKey);
+			this.stream.showTextHex(hexStr);
+		} else {
+			// Standard 14: use literal string (ASCII)
+			this.stream.showText(escapePdfString(displayText));
+		}
+
+		this.stream.endText();
 	}
 
 	/** Paint highlight/background behind a fragment. */
@@ -152,5 +239,33 @@ export class TextPainter {
 
 			this.stream.restore();
 		}
+	}
+
+	/**
+	 * Estimate the width of a text string in PDF points.
+	 * Uses a rough approximation for Standard 14 fonts (average char width ~0.5 * fontSize).
+	 */
+	private estimateTextWidth(text: string, fontSize: number): number {
+		// Approximate: average character width is ~0.5 of font size for proportional fonts
+		return text.length * fontSize * 0.5;
+	}
+
+	/**
+	 * Encode a text string as hex for CID font output.
+	 * Each character's Unicode codepoint is looked up in the glyph mapping
+	 * to find the corresponding glyph ID (CID), then encoded as a 4-digit hex value.
+	 */
+	private encodeTextAsHex(text: string, fontKey: string): string {
+		const mapping = this.glyphMappings.get(fontKey);
+		let hex = '';
+
+		for (const char of text) {
+			const codePoint = char.codePointAt(0) ?? 0;
+			// Look up the glyph ID; fall back to 0 (.notdef) if not found
+			const glyphId = mapping?.get(codePoint) ?? 0;
+			hex += glyphId.toString(16).toUpperCase().padStart(4, '0');
+		}
+
+		return hex;
 	}
 }

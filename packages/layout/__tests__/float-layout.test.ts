@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { positionFloats, getLineExclusions, isBlockedByFloat } from '../src/float-layout';
+import { describe, expect, it } from 'vitest';
+import { getLineExclusions, isBlockedByFloat, positionFloats } from '../src/float-layout';
 import type { FloatingItem, PositionedFloat } from '../src/float-layout';
 import type { LayoutRect } from '../src/types';
 

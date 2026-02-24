@@ -1,17 +1,17 @@
-import { describe, it, expect } from 'vitest';
 import {
-	createDocument,
+	DEFAULT_SECTION_PROPERTIES,
 	createBody,
-	createSection,
+	createDocument,
 	createParagraph,
 	createRun,
-	createText,
+	createSection,
 	createTable,
-	createTableRow,
 	createTableCell,
+	createTableRow,
+	createText,
 	generateId,
-	DEFAULT_SECTION_PROPERTIES,
 } from '@jpoffice/model';
+import { describe, expect, it } from 'vitest';
 import { LayoutEngine } from '../src/layout-engine';
 import { isLayoutParagraph, isLayoutTable } from '../src/types';
 
@@ -137,11 +137,7 @@ describe('LayoutEngine', () => {
 		const row = createTableRow(generateId(), [cell1, cell2], {});
 		const table = createTable(generateId(), [row], {}, [{ width: 3000 }, { width: 3000 }]);
 
-		const section = createSection(
-			generateId(),
-			[table],
-			DEFAULT_SECTION_PROPERTIES,
-		);
+		const section = createSection(generateId(), [table], DEFAULT_SECTION_PROPERTIES);
 		const body = createBody(generateId(), [section]);
 		const doc = createDocument({ id: generateId(), body });
 
@@ -166,11 +162,7 @@ describe('LayoutEngine', () => {
 		const table = createTable(generateId(), [row], {}, [{ width: 5000 }]);
 		const para2 = makeParagraph('After table');
 
-		const section = createSection(
-			generateId(),
-			[para1, table, para2],
-			DEFAULT_SECTION_PROPERTIES,
-		);
+		const section = createSection(generateId(), [para1, table, para2], DEFAULT_SECTION_PROPERTIES);
 		const body = createBody(generateId(), [section]);
 		const doc = createDocument({ id: generateId(), body });
 
@@ -207,10 +199,7 @@ describe('LayoutEngine', () => {
 	});
 
 	it('all fragments have valid coordinates', () => {
-		const doc = makeDocument([
-			makeParagraph('Some text here'),
-			makeParagraph('More text to test'),
-		]);
+		const doc = makeDocument([makeParagraph('Some text here'), makeParagraph('More text to test')]);
 		const engine = new LayoutEngine();
 		const result = engine.layout(doc);
 

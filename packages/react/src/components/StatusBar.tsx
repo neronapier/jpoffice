@@ -14,13 +14,14 @@ const defaultStyle: CSSProperties = {
 	display: 'flex',
 	alignItems: 'center',
 	gap: '16px',
-	padding: '4px 12px',
+	padding: '4px 16px',
 	fontSize: '12px',
-	color: '#666',
-	borderTop: '1px solid #e0e0e0',
-	backgroundColor: '#fafafa',
+	color: '#5f6368',
+	borderTop: '1px solid #dadce0',
+	backgroundColor: '#f9fbfd',
 	userSelect: 'none',
 	flexShrink: 0,
+	height: 24,
 };
 
 /**
@@ -31,18 +32,29 @@ export function StatusBar({ language, className, style }: StatusBarProps) {
 	const currentPage = useCurrentPage();
 
 	return (
-		<div className={className} style={{ ...defaultStyle, ...style }}>
+		<output
+			className={className}
+			aria-live="polite"
+			aria-label="Document status"
+			style={{ ...defaultStyle, ...style }}
+		>
 			<span>{`Page ${currentPage} of ${stats.pageCount}`}</span>
-			<span style={{ color: '#ccc' }}>|</span>
+			<span aria-hidden="true" style={{ color: '#dadce0' }}>
+				|
+			</span>
 			<span>{`Words: ${stats.wordCount}`}</span>
-			<span style={{ color: '#ccc' }}>|</span>
+			<span aria-hidden="true" style={{ color: '#dadce0' }}>
+				|
+			</span>
 			<span>{`Characters: ${stats.charCount}`}</span>
 			{language && (
 				<>
-					<span style={{ color: '#ccc' }}>|</span>
+					<span aria-hidden="true" style={{ color: '#dadce0' }}>
+						|
+					</span>
 					<span>{language}</span>
 				</>
 			)}
-		</div>
+		</output>
 	);
 }

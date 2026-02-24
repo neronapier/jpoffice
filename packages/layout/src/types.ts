@@ -50,6 +50,7 @@ export interface LayoutFragment {
 	readonly runOffset: number; // character offset within the run's text
 	readonly charCount: number;
 	readonly style: ResolvedRunStyle;
+	readonly href?: string; // hyperlink URL if this fragment is inside a hyperlink
 }
 
 /**
@@ -71,6 +72,8 @@ export interface LayoutParagraph {
 	readonly rect: LayoutRect;
 	readonly lines: readonly LayoutLine[];
 	readonly nodePath: JPPath;
+	readonly outlineLevel?: number; // 0-5 for H1-H6, used for PDF document outlines
+	readonly columnIndex?: number; // which column this block belongs to (multi-column layout)
 }
 
 /**
@@ -117,6 +120,7 @@ export interface LayoutTable {
 	readonly height: number;
 	readonly rows: readonly LayoutTableRow[];
 	readonly borders?: JPTableBorders;
+	readonly columnIndex?: number; // which column this block belongs to (multi-column layout)
 }
 
 /**
@@ -128,6 +132,7 @@ export interface LayoutImage {
 	readonly nodePath: JPPath;
 	readonly src: string;
 	readonly mimeType?: string;
+	readonly columnIndex?: number; // which column this block belongs to (multi-column layout)
 }
 
 /**
@@ -160,6 +165,16 @@ export interface LayoutHeaderFooter {
 }
 
 /**
+ * Column metadata for a multi-column page.
+ */
+export interface LayoutPageColumns {
+	readonly count: number;
+	readonly space: number; // px between columns
+	readonly separator: boolean;
+	readonly columnWidths: readonly number[]; // width of each column in px
+}
+
+/**
  * A laid-out page.
  */
 export interface LayoutPage {
@@ -171,6 +186,7 @@ export interface LayoutPage {
 	readonly floats?: readonly LayoutFloat[];
 	readonly header?: LayoutHeaderFooter;
 	readonly footer?: LayoutHeaderFooter;
+	readonly columns?: LayoutPageColumns; // present when section has multi-column layout
 }
 
 /**

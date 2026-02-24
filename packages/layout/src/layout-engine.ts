@@ -5,6 +5,8 @@ import type {
 	JPHeaderFooterContent,
 	JPHeaderFooterRef,
 	JPHyperlink,
+	JPNumberFormat,
+	JPNumberingLevel,
 	JPParagraph,
 	JPPath,
 	JPRun,
@@ -12,8 +14,16 @@ import type {
 	JPStyleRegistry,
 	JPTable,
 } from '@jpoffice/model';
-import { emuToPx, isText, twipsToPx } from '@jpoffice/model';
+import {
+	emuToPx,
+	isText,
+	resolveNumberingLevel,
+	resolveStyleParagraphProperties,
+	twipsToPx,
+} from '@jpoffice/model';
 import type { LayoutCache } from './cache';
+import type { ColumnConfig } from './column-layout';
+import { calculateColumnRegions, distributeBlocksToColumns } from './column-layout';
 import type { FloatingItem, PositionedFloat } from './float-layout';
 import { positionFloats } from './float-layout';
 import type { InlineItem } from './line-breaker';
@@ -26,11 +36,13 @@ import type {
 	LayoutBlock,
 	LayoutHeaderFooter,
 	LayoutPage,
+	LayoutPageColumns,
 	LayoutParagraph,
 	LayoutRect,
 	LayoutResult,
 	LayoutTable,
 } from './types';
+import { isLayoutParagraph, isLayoutTable } from './types';
 
 /**
  * The layout engine transforms a JPDocument into a LayoutResult.
@@ -41,6 +53,11 @@ export class LayoutEngine {
 	private measurer: TextMeasurer;
 	private version = 0;
 	private _cache: LayoutCache | null = null;
+
+	/** Tracks sequential numbering counters per numId+level. */
+	private numberingCounters = new Map<string, number>();
+	/** Tracks whether the previous paragraph had numbering (for counter reset). */
+	private lastNumberingNumId: number | null = null;
 
 	constructor(measurer?: TextMeasurer, cache?: LayoutCache) {
 		this.measurer = measurer ?? new TextMeasurer();
@@ -57,6 +74,8 @@ export class LayoutEngine {
 	 */
 	layout(doc: JPDocument): LayoutResult {
 		this.version++;
+		this.numberingCounters.clear();
+		this.lastNumberingNumId = null;
 		const pages: LayoutPage[] = [];
 
 		const body = doc.children[0]; // JPBody
@@ -94,6 +113,13 @@ export class LayoutEngine {
 		pages: LayoutPage[],
 	): void {
 		const props = section.properties;
+
+		// Check for multi-column layout
+		if (props.columns && props.columns.count > 1) {
+			this.layoutSectionMultiColumn(doc, section, sectionPath, pages);
+			return;
+		}
+
 		const pageWidth = twipsToPx(props.pageSize.width);
 		const pageHeight = twipsToPx(props.pageSize.height);
 		const marginTop = twipsToPx(props.margins.top);
@@ -355,6 +381,223 @@ export class LayoutEngine {
 	}
 
 	/**
+	 * Layout a section with multi-column configuration.
+	 *
+	 * Strategy:
+	 * 1. Layout each block using column width (not full content width)
+	 *    into a virtual content area starting at y=0.
+	 * 2. Collect these "measured" blocks sequentially.
+	 * 3. Distribute them across columns using distributeBlocksToColumns.
+	 * 4. When all columns are full, emit a page and start fresh.
+	 * 5. Handle column-break nodes by flushing to the next column.
+	 */
+	private layoutSectionMultiColumn(
+		doc: JPDocument,
+		section: JPSection,
+		sectionPath: JPPath,
+		pages: LayoutPage[],
+	): void {
+		const props = section.properties;
+		const pageWidth = twipsToPx(props.pageSize.width);
+		const pageHeight = twipsToPx(props.pageSize.height);
+		const marginTop = twipsToPx(props.margins.top);
+		const marginRight = twipsToPx(props.margins.right);
+		const marginBottom = twipsToPx(props.margins.bottom);
+		const marginLeft = twipsToPx(props.margins.left);
+		const headerMargin = twipsToPx(props.margins.header);
+		const footerMargin = twipsToPx(props.margins.footer);
+
+		const sectionColumns = props.columns!;
+		const columnConfig: ColumnConfig = {
+			count: sectionColumns.count,
+			space: twipsToPx(sectionColumns.space),
+			separator: sectionColumns.separator,
+		};
+
+		// Resolve header/footer
+		const contentAreaWidth = pageWidth - marginLeft - marginRight;
+		const hfLayouts = this.resolveHeaderFooterLayouts(
+			doc,
+			props.headerReferences,
+			props.footerReferences,
+			contentAreaWidth,
+			headerMargin,
+			footerMargin,
+			pageHeight,
+		);
+
+		const buildContentArea = (pageIndexInSection: number): LayoutRect => {
+			const hf = this.pickHeaderFooter(hfLayouts, pageIndexInSection);
+			const effectiveTop =
+				hf.headerHeight > 0 ? Math.max(marginTop, headerMargin + hf.headerHeight) : marginTop;
+			const effectiveBottom =
+				hf.footerHeight > 0 ? Math.max(marginBottom, footerMargin + hf.footerHeight) : marginBottom;
+			return {
+				x: marginLeft,
+				y: effectiveTop,
+				width: contentAreaWidth,
+				height: pageHeight - effectiveTop - effectiveBottom,
+			};
+		};
+
+		// Calculate column regions
+		const columnRegions = calculateColumnRegions(contentAreaWidth, columnConfig);
+		const columnWidth = columnRegions[0].width;
+
+		// Build column metadata for pages
+		const pageColumnsMetadata: LayoutPageColumns = {
+			count: columnConfig.count,
+			space: columnConfig.space,
+			separator: columnConfig.separator,
+			columnWidths: columnRegions.map((r) => r.width),
+		};
+
+		// Virtual content area for laying out blocks at column width
+		const virtualContentArea: LayoutRect = {
+			x: 0,
+			y: 0,
+			width: columnWidth,
+			height: 99999, // unconstrained for measurement
+		};
+
+		let pageIndexInSection = 0;
+		let contentArea = buildContentArea(pageIndexInSection);
+
+		// Accumulator: blocks laid out sequentially at (0, cursorY) with column width.
+		// These will be distributed across columns when a page is emitted.
+		let pendingBlocks: LayoutBlock[] = [];
+		let virtualCursorY = 0;
+
+		const emitPage = (blocksForPage: LayoutBlock[]): void => {
+			const hf = this.pickHeaderFooter(hfLayouts, pageIndexInSection);
+			const distributed = distributeBlocksToColumns(blocksForPage, columnRegions, contentArea);
+
+			// Collect all repositioned blocks from all columns
+			const allBlocks: LayoutBlock[] = [];
+			for (const col of distributed.columns) {
+				allBlocks.push(...col.blocks);
+			}
+
+			const page: LayoutPage = {
+				index: pages.length,
+				width: pageWidth,
+				height: pageHeight,
+				contentArea,
+				blocks: allBlocks,
+				header: hf.header,
+				footer: hf.footer,
+				columns: pageColumnsMetadata,
+			};
+			pages.push(page);
+
+			pageIndexInSection++;
+			contentArea = buildContentArea(pageIndexInSection);
+
+			// If there's overflow, re-layout overflow blocks for the new page
+			if (distributed.overflow.length > 0) {
+				// Re-position overflow blocks starting from y=0
+				pendingBlocks = [];
+				virtualCursorY = 0;
+				for (const block of distributed.overflow) {
+					const height = getBlockHeightFromBlock(block);
+					const repositioned = repositionBlockToY(block, virtualCursorY);
+					pendingBlocks.push(repositioned);
+					virtualCursorY += height;
+				}
+			} else {
+				pendingBlocks = [];
+				virtualCursorY = 0;
+			}
+		};
+
+		// Check if pending blocks would fill all columns
+		const wouldOverflowAllColumns = (): boolean => {
+			// Quick estimate: total height of pending blocks vs total available column height
+			const contentHeight = contentArea.height;
+			const totalColumnHeight = contentHeight * columnConfig.count;
+			return virtualCursorY > totalColumnHeight;
+		};
+
+		// Pre-compute paragraph layouts for keepNext lookahead
+		const blockLayouts: {
+			block: JPBlockNode;
+			path: JPPath;
+			paraLayout?: ResolvedParagraphLayout;
+		}[] = [];
+		for (let bi = 0; bi < section.children.length; bi++) {
+			const block = section.children[bi];
+			const blockPath: JPPath = [...sectionPath, bi];
+			const paraLayout =
+				block.type === 'paragraph'
+					? resolveParagraphLayout(doc.styles, block.properties)
+					: undefined;
+			blockLayouts.push({ block, path: blockPath, paraLayout });
+		}
+
+		for (let bi = 0; bi < blockLayouts.length; bi++) {
+			const { block, path: blockPath } = blockLayouts[bi];
+
+			// Explicit page break: emit current page with pending blocks
+			if (block.type === 'page-break') {
+				if (pendingBlocks.length > 0) {
+					emitPage(pendingBlocks);
+				}
+				// If overflow was already handled by emitPage, pendingBlocks may have content
+				// from overflow. That's fine, it'll go on the new page.
+				continue;
+			}
+
+			// pageBreakBefore
+			if (
+				block.type === 'paragraph' &&
+				block.properties.pageBreakBefore &&
+				pendingBlocks.length > 0
+			) {
+				emitPage(pendingBlocks);
+			}
+
+			if (block.type === 'paragraph') {
+				const layoutResult = this.layoutParagraph(
+					doc,
+					block,
+					blockPath,
+					{ ...virtualContentArea, y: virtualCursorY },
+					virtualCursorY,
+					[], // no floats in multi-column for now
+				);
+
+				pendingBlocks.push(layoutResult);
+				virtualCursorY = layoutResult.rect.y + layoutResult.rect.height;
+
+				// Check if we've accumulated enough to fill all columns
+				if (wouldOverflowAllColumns()) {
+					emitPage(pendingBlocks);
+				}
+			} else if (block.type === 'table') {
+				const tableLayout = this.layoutTableBlock(
+					doc,
+					block,
+					blockPath,
+					{ ...virtualContentArea, y: virtualCursorY },
+					virtualCursorY,
+				);
+
+				pendingBlocks.push(tableLayout);
+				virtualCursorY = tableLayout.y + tableLayout.height;
+
+				if (wouldOverflowAllColumns()) {
+					emitPage(pendingBlocks);
+				}
+			}
+		}
+
+		// Flush remaining blocks
+		if (pendingBlocks.length > 0 || pages.length === 0) {
+			emitPage(pendingBlocks);
+		}
+	}
+
+	/**
 	 * Try to split a paragraph across pages, respecting widow/orphan control.
 	 */
 	private trySplitParagraph(
@@ -383,9 +626,10 @@ export class LayoutEngine {
 		if (lines.length <= 1) return null;
 
 		// Find the split point: last line that fits
+		// line.rect.y is block-relative, convert to absolute for comparison with pageBottom
 		let splitAfter = 0;
 		for (let i = 0; i < lines.length; i++) {
-			const lineBottom = lines[i].rect.y + lines[i].rect.height;
+			const lineBottom = full.rect.y + lines[i].rect.y + lines[i].rect.height;
 			if (lineBottom > pageBottom) break;
 			splitAfter = i + 1;
 		}
@@ -413,19 +657,22 @@ export class LayoutEngine {
 		}
 
 		// Build first part (lines on current page)
+		// line.rect.y is block-relative, so height from block start = line.rect.y + line.rect.height
 		const firstLines = lines.slice(0, splitAfter);
 		const lastFirstLine = firstLines[firstLines.length - 1];
-		const firstHeight = lastFirstLine.rect.y + lastFirstLine.rect.height - full.rect.y;
+		const firstHeight = lastFirstLine.rect.y + lastFirstLine.rect.height;
 
 		const firstPart: LayoutParagraph = {
 			rect: { ...full.rect, height: firstHeight },
 			lines: firstLines,
 			nodePath: paragraphPath,
+			...(full.outlineLevel !== undefined ? { outlineLevel: full.outlineLevel } : {}),
 		};
 
 		// Build second part (lines on next page)
+		// line.rect.y is block-relative; rebase so first line starts at Y=0 relative to new block
 		const secondLines = lines.slice(splitAfter);
-		const lineYOffset = contentArea.y - secondLines[0].rect.y;
+		const lineYOffset = -secondLines[0].rect.y;
 		const repositionedLines = secondLines.map((line, i) => ({
 			...line,
 			rect: { ...line.rect, y: line.rect.y + lineYOffset },
@@ -437,7 +684,7 @@ export class LayoutEngine {
 		}));
 
 		const secondLastLine = repositionedLines[repositionedLines.length - 1];
-		const secondHeight = secondLastLine.rect.y + secondLastLine.rect.height - contentArea.y;
+		const secondHeight = secondLastLine.rect.y + secondLastLine.rect.height;
 
 		const secondPart: LayoutParagraph = {
 			rect: {
@@ -448,6 +695,7 @@ export class LayoutEngine {
 			},
 			lines: repositionedLines,
 			nodePath: paragraphPath,
+			...(full.outlineLevel !== undefined ? { outlineLevel: full.outlineLevel } : {}),
 		};
 
 		return { firstPart, secondPart };
@@ -518,16 +766,73 @@ export class LayoutEngine {
 		floatingItems: FloatingItem[],
 		pageFloats?: PositionedFloat[],
 	): LayoutParagraph {
-		const paraLayout = resolveParagraphLayout(doc.styles, paragraph.properties);
+		let paraLayout = resolveParagraphLayout(doc.styles, paragraph.properties);
 
 		// Collect inline items from runs, handling all node types
 		const items = this.collectInlineItems(doc.styles, paragraph, paragraphPath, floatingItems, doc);
 
+		// Handle list numbering: prepend marker and override indent
+		const numbering = paragraph.properties.numbering;
+		if (numbering) {
+			const { numId, level } = numbering;
+
+			// Resolve numbering level from registry or use defaults
+			const numLevel =
+				resolveNumberingLevel(doc.numbering, numId, level) ??
+				this.getDefaultNumberingLevel(numId, level);
+
+			// When switching to a different numId, reset all counters
+			if (this.lastNumberingNumId !== null && this.lastNumberingNumId !== numId) {
+				this.numberingCounters.clear();
+			}
+
+			// Reset higher-level counters when returning to a lower level
+			for (let l = level + 1; l <= 8; l++) {
+				this.numberingCounters.delete(`${numId}-${l}`);
+			}
+
+			// Generate marker text
+			const markerText = this.getMarkerText(numLevel, numId, level);
+			this.lastNumberingNumId = numId;
+
+			// Override paragraph indent with numbering level indent
+			const numIndentLeft = twipsToPx(numLevel.indent);
+			const numHanging = twipsToPx(numLevel.hangingIndent);
+			paraLayout = {
+				...paraLayout,
+				indentLeft: Math.max(paraLayout.indentLeft, numIndentLeft),
+				indentFirstLine: -numHanging,
+			};
+
+			// Create marker style from paragraph's default run style
+			const markerBaseStyle = resolveRunStyle(doc.styles, paragraph.properties, {});
+			const markerStyle = numLevel.font
+				? { ...markerBaseStyle, fontFamily: numLevel.font }
+				: markerBaseStyle;
+
+			// Prepend marker as the first inline item
+			items.unshift({
+				text: `${markerText}\t`,
+				style: markerStyle,
+				runPath: paragraphPath,
+				runOffset: -1,
+			});
+		} else {
+			// Non-list paragraph: reset counters to break list sequences
+			if (this.lastNumberingNumId !== null) {
+				this.numberingCounters.clear();
+				this.lastNumberingNumId = null;
+			}
+		}
+
 		const availableWidth = contentArea.width - paraLayout.indentLeft - paraLayout.indentRight;
-		const y = startY + paraLayout.spaceBefore;
+		const relativeY = paraLayout.spaceBefore;
 
 		const contentLeft = contentArea.x + paraLayout.indentLeft;
 		const contentRight = contentArea.x + contentArea.width - paraLayout.indentRight;
+
+		// Translate float Y coordinates from absolute to block-relative
+		const relativeFloats = pageFloats?.map(f => ({ ...f, y: f.y - startY }));
 
 		const lines = breakIntoLines(
 			items,
@@ -537,19 +842,30 @@ export class LayoutEngine {
 			paraLayout.alignment,
 			paraLayout.lineSpacing,
 			paragraphPath,
-			y,
-			pageFloats,
+			relativeY,
+			relativeFloats,
 			contentLeft,
 			contentRight,
+			paragraph.properties.direction,
 		);
 
 		const totalLinesHeight =
 			lines.length > 0
-				? lines[lines.length - 1].rect.y + lines[lines.length - 1].rect.height - y
+				? lines[lines.length - 1].rect.y + lines[lines.length - 1].rect.height - relativeY
 				: 0;
 		const totalHeight = paraLayout.spaceBefore + totalLinesHeight + paraLayout.spaceAfter;
 
-		return {
+		// Resolve outlineLevel from merged paragraph properties (style + direct)
+		let resolvedOutlineLevel: number | undefined = paragraph.properties.outlineLevel;
+		if (resolvedOutlineLevel === undefined && paragraph.properties.styleId) {
+			const mergedParaProps = resolveStyleParagraphProperties(
+				doc.styles,
+				paragraph.properties.styleId,
+			);
+			resolvedOutlineLevel = mergedParaProps.outlineLevel;
+		}
+
+		const result: LayoutParagraph = {
 			rect: {
 				x: contentArea.x + paraLayout.indentLeft,
 				y: startY,
@@ -558,7 +874,11 @@ export class LayoutEngine {
 			},
 			lines,
 			nodePath: paragraphPath,
+			...(resolvedOutlineLevel !== undefined && resolvedOutlineLevel >= 0
+				? { outlineLevel: resolvedOutlineLevel }
+				: {}),
 		};
+		return result;
 	}
 
 	private collectInlineItems(
@@ -616,10 +936,19 @@ export class LayoutEngine {
 
 				case 'hyperlink': {
 					const hyperlink = child as JPHyperlink;
+					const startIdx = items.length;
 					for (let hi = 0; hi < hyperlink.children.length; hi++) {
 						const hRun = hyperlink.children[hi];
 						const hRunPath: JPPath = [...childPath, hi];
 						this.collectRunItems(styles, paragraph, hRun, hRunPath, items);
+					}
+					// Patch style for hyperlinks: blue color + underline, and attach href
+					for (let i = startIdx; i < items.length; i++) {
+						items[i] = {
+							...items[i],
+							style: { ...items[i].style, color: '#1a73e8', underline: 'single' },
+							href: hyperlink.href,
+						};
 					}
 					break;
 				}
@@ -659,23 +988,117 @@ export class LayoutEngine {
 		items: InlineItem[],
 	): void {
 		const style = resolveRunStyle(styles, paragraph.properties, run.properties);
-		let offset = 0;
 		for (let ti = 0; ti < run.children.length; ti++) {
 			const textChild = run.children[ti];
 			if (isText(textChild)) {
+				const textPath: JPPath = [...runPath, ti];
 				items.push({
 					text: textChild.text,
 					style,
-					runPath,
-					runOffset: offset,
+					runPath: textPath,
+					runOffset: 0,
 				});
-				offset += textChild.text.length;
 			}
 		}
 	}
 
 	getMeasurer(): TextMeasurer {
 		return this.measurer;
+	}
+
+	// ── List Numbering Helpers ────────────────────────────────────────────────
+
+	/** Default numbering level definitions for built-in lists (when registry is empty). */
+	private getDefaultNumberingLevel(numId: number, level: number): JPNumberingLevel {
+		const BULLET_NUM_ID = 1;
+		const bulletChars = ['\u2022', '\u25E6', '\u25AA']; // •, ◦, ▪
+		const numberFormats: JPNumberFormat[] = ['decimal', 'lowerLetter', 'lowerRoman'];
+		const baseIndent = 720; // twips per level
+		const hanging = 360; // twips
+
+		if (numId === BULLET_NUM_ID) {
+			return {
+				level,
+				format: 'bullet',
+				text: bulletChars[level % bulletChars.length],
+				alignment: 'left',
+				indent: baseIndent * (level + 1),
+				hangingIndent: hanging,
+			};
+		}
+		// Numbered list (numId=2 or any other)
+		const format = numberFormats[level % numberFormats.length];
+		return {
+			level,
+			format,
+			text: `%${level + 1}.`,
+			alignment: 'left',
+			indent: baseIndent * (level + 1),
+			hangingIndent: hanging,
+		};
+	}
+
+	/** Generate the display text for a list marker (e.g. "•", "1.", "a."). */
+	private getMarkerText(numLevel: JPNumberingLevel, numId: number, level: number): string {
+		if (numLevel.format === 'bullet') {
+			return numLevel.text || '\u2022';
+		}
+
+		// Increment and get the counter for this numId+level
+		const key = `${numId}-${level}`;
+		const current = (this.numberingCounters.get(key) ?? 0) + 1;
+		this.numberingCounters.set(key, current);
+
+		const start = numLevel.start ?? 1;
+		const value = start + current - 1;
+
+		return this.formatNumberValue(value, numLevel.format, numLevel.text);
+	}
+
+	/** Format a number value according to the numbering format. */
+	private formatNumberValue(value: number, format: JPNumberFormat, textPattern?: string): string {
+		let formatted: string;
+		switch (format) {
+			case 'decimal':
+				formatted = String(value);
+				break;
+			case 'lowerLetter':
+				formatted = String.fromCharCode(96 + ((value - 1) % 26) + 1); // a-z
+				break;
+			case 'upperLetter':
+				formatted = String.fromCharCode(64 + ((value - 1) % 26) + 1); // A-Z
+				break;
+			case 'lowerRoman':
+				formatted = this.toRoman(value).toLowerCase();
+				break;
+			case 'upperRoman':
+				formatted = this.toRoman(value);
+				break;
+			default:
+				formatted = String(value);
+				break;
+		}
+
+		// Apply text pattern if present (e.g. "%1." → "1.")
+		if (textPattern) {
+			return textPattern.replace(/%\d+/g, formatted);
+		}
+		return `${formatted}.`;
+	}
+
+	/** Convert a number to Roman numeral string. */
+	private toRoman(num: number): string {
+		const vals = [1000, 900, 500, 400, 100, 90, 50, 40, 10, 9, 5, 4, 1];
+		const syms = ['M', 'CM', 'D', 'CD', 'C', 'XC', 'L', 'XL', 'X', 'IX', 'V', 'IV', 'I'];
+		let result = '';
+		let remaining = num;
+		for (let i = 0; i < vals.length; i++) {
+			while (remaining >= vals[i]) {
+				result += syms[i];
+				remaining -= vals[i];
+			}
+		}
+		return result;
 	}
 
 	// ── Header/Footer Layout Helpers ─────────────────────────────────────────
@@ -853,7 +1276,7 @@ export class LayoutEngine {
 		}
 
 		const availableWidth = contentArea.width - paraLayout.indentLeft - paraLayout.indentRight;
-		const y = startY + paraLayout.spaceBefore;
+		const relativeY = paraLayout.spaceBefore;
 
 		const lines = breakIntoLines(
 			items,
@@ -863,12 +1286,16 @@ export class LayoutEngine {
 			paraLayout.alignment,
 			paraLayout.lineSpacing,
 			dummyPath,
-			y,
+			relativeY,
+			undefined,
+			undefined,
+			undefined,
+			paragraph.properties.direction,
 		);
 
 		const totalLinesHeight =
 			lines.length > 0
-				? lines[lines.length - 1].rect.y + lines[lines.length - 1].rect.height - y
+				? lines[lines.length - 1].rect.y + lines[lines.length - 1].rect.height - relativeY
 				: 0;
 		const totalHeight = paraLayout.spaceBefore + totalLinesHeight + paraLayout.spaceAfter;
 
@@ -893,4 +1320,55 @@ interface HeaderFooterLayouts {
 	defaultFooter?: LayoutHeaderFooter;
 	firstFooter?: LayoutHeaderFooter;
 	evenFooter?: LayoutHeaderFooter;
+}
+
+// ── Multi-column layout helpers ─────────────────────────────────────────────
+
+/** Get the height of a layout block. */
+function getBlockHeightFromBlock(block: LayoutBlock): number {
+	if (isLayoutParagraph(block)) {
+		return block.rect.height;
+	}
+	if (isLayoutTable(block)) {
+		return block.height;
+	}
+	// LayoutImage
+	return block.rect.height;
+}
+
+/**
+ * Reposition a block to start at a new Y coordinate, preserving its relative
+ * internal structure. Used when re-flowing overflow blocks to a new page.
+ */
+function repositionBlockToY(block: LayoutBlock, newY: number): LayoutBlock {
+	if (isLayoutParagraph(block)) {
+		// line.rect.y and fragment.rect.y are block-relative, no adjustment needed
+		return {
+			...block,
+			rect: { ...block.rect, y: newY },
+		};
+	}
+
+	if (isLayoutTable(block)) {
+		const yDelta = newY - block.y;
+		return {
+			...block,
+			y: newY,
+			rows: block.rows.map((row) => ({
+				...row,
+				y: row.y + yDelta,
+				cells: row.cells.map((cell) => ({
+					...cell,
+					y: cell.y + yDelta,
+					contentRect: { ...cell.contentRect, y: cell.contentRect.y + yDelta },
+				})),
+			})),
+		};
+	}
+
+	// LayoutImage
+	return {
+		...block,
+		rect: { ...block.rect, y: newY },
+	};
 }

@@ -1,6 +1,7 @@
 import type {
 	JPBlockNode,
 	JPDocumentMetadata,
+	JPFieldType,
 	JPFooter,
 	JPHeader,
 	JPHeaderFooterRef,
@@ -15,6 +16,9 @@ import {
 	DEFAULT_SECTION_PROPERTIES,
 	createBookmarkEnd,
 	createBookmarkStart,
+	createCommentRangeEnd,
+	createCommentRangeStart,
+	createField,
 	createFooter,
 	createHeader,
 	createHyperlink,
@@ -27,6 +31,7 @@ import { NS } from '../xml/namespaces';
 import { attrNS, getDirectChildren, getFirstChild, textContent } from '../xml/xml-parser';
 import type { DocxPackage } from './docx-reader';
 import { mimeFromExtension, parseDrawing } from './drawing-parser';
+import { parseEquation } from './equation-parser';
 import type { RelationshipMap } from './relationships-parser';
 import { resolveTarget } from './relationships-parser';
 import { parseParagraphProperties, parseRunWithBreaks } from './run-parser';
@@ -164,6 +169,8 @@ function parseParagraphElement(
 		if (ce.namespaceURI === NS.w) {
 			switch (ce.localName) {
 				case 'r': {
+					// Skip runs that only contain w:commentReference (comment marker runs)
+					if (isCommentReferenceRun(ce)) break;
 					const nodes = parseRunWithBreaks(ce);
 					for (const node of nodes) inlines.push(node);
 					break;
@@ -182,6 +189,59 @@ function parseParagraphElement(
 				case 'bookmarkEnd': {
 					const bmId = attrNS(ce, NS.w, 'id') || '0';
 					inlines.push(createBookmarkEnd(generateId(), bmId));
+					break;
+				}
+				case 'commentRangeStart': {
+					const commentId = attrNS(ce, NS.w, 'id') || '0';
+					inlines.push(createCommentRangeStart(generateId(), commentId));
+					break;
+				}
+				case 'commentRangeEnd': {
+					const commentId = attrNS(ce, NS.w, 'id') || '0';
+					inlines.push(createCommentRangeEnd(generateId(), commentId));
+					break;
+				}
+				case 'fldSimple': {
+					const instr = attrNS(ce, NS.w, 'instr') || '';
+					const fieldType = parseFieldInstruction(instr);
+					let cachedResult = '';
+					const innerRuns = ce.childNodes;
+					for (let j = 0; j < innerRuns.length; j++) {
+						const ir = innerRuns[j];
+						if (ir.nodeType !== 1) continue;
+						const ire = ir as Element;
+						if (ire.namespaceURI === NS.w && ire.localName === 'r') {
+							const t = getFirstChild(ire, NS.w, 't');
+							if (t) cachedResult += textContent(t);
+						}
+					}
+					inlines.push(
+						createField(generateId(), fieldType, { instruction: instr.trim(), cachedResult }),
+					);
+					break;
+				}
+				case 'ins':
+				case 'del': {
+					const author = attrNS(ce, NS.w, 'author') || '';
+					const date = attrNS(ce, NS.w, 'date') || '';
+					const revType = ce.localName === 'ins' ? 'insertion' : 'deletion';
+					const revisionId = attrNS(ce, NS.w, 'id') || generateId();
+					const revisionContext = {
+						revisionId,
+						author,
+						date,
+						type: revType as 'insertion' | 'deletion',
+					};
+					const insChildren = ce.childNodes;
+					for (let j = 0; j < insChildren.length; j++) {
+						const insChild = insChildren[j];
+						if (insChild.nodeType !== 1) continue;
+						const ice = insChild as Element;
+						if (ice.namespaceURI === NS.w && ice.localName === 'r') {
+							const revNodes = parseRunWithBreaks(ice, revisionContext);
+							for (const node of revNodes) inlines.push(node);
+						}
+					}
 					break;
 				}
 			}
@@ -212,6 +272,12 @@ function parseParagraphElement(
 					}
 				}
 			}
+		}
+
+		// Handle math equations (m: namespace)
+		if (ce.namespaceURI === NS.m && (ce.localName === 'oMath' || ce.localName === 'oMathPara')) {
+			const equation = parseEquation(ce);
+			if (equation) inlines.push(equation);
 		}
 	}
 
@@ -456,4 +522,30 @@ function intOrDefault(val: string | null, fallback: number): number {
 	if (val === null) return fallback;
 	const n = Number.parseInt(val, 10);
 	return Number.isNaN(n) ? fallback : n;
+}
+
+/** Check if a w:r element only contains w:commentReference (no real text). */
+function isCommentReferenceRun(el: Element): boolean {
+	const nodes = el.childNodes;
+	for (let i = 0; i < nodes.length; i++) {
+		const child = nodes[i];
+		if (child.nodeType !== 1) continue;
+		const ce = child as Element;
+		if (ce.namespaceURI === NS.w && ce.localName === 'commentReference') {
+			return true;
+		}
+	}
+	return false;
+}
+
+function parseFieldInstruction(instr: string): JPFieldType {
+	const trimmed = instr.trim().toUpperCase();
+	if (trimmed.startsWith('PAGE')) return 'PAGE';
+	if (trimmed.startsWith('NUMPAGES')) return 'NUMPAGES';
+	if (trimmed.startsWith('DATE')) return 'DATE';
+	if (trimmed.startsWith('TIME')) return 'TIME';
+	if (trimmed.startsWith('AUTHOR')) return 'AUTHOR';
+	if (trimmed.startsWith('TITLE')) return 'TITLE';
+	if (trimmed.startsWith('FILENAME')) return 'FILENAME';
+	return 'PAGE';
 }

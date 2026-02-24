@@ -6,6 +6,7 @@ import type {
 	JPLineSpacingRule,
 	JPParagraphBorders,
 	JPParagraphProperties,
+	JPRevisionInfo,
 	JPRunProperties,
 	JPShading,
 	JPTabLeader,
@@ -15,9 +16,27 @@ import type {
 	JPTableCellMargins,
 	JPUnderlineStyle,
 } from '@jpoffice/model';
-import { createColumnBreak, createRun, createTab, createText, generateId } from '@jpoffice/model';
+import {
+	createColumnBreak,
+	createEndnoteRef,
+	createFootnoteRef,
+	createRun,
+	createTab,
+	createText,
+	generateId,
+} from '@jpoffice/model';
 import { NS } from '../xml/namespaces';
 import { attrNS, getDirectChildren, getFirstChild, textContent } from '../xml/xml-parser';
+
+// ─── Revision Context ──────────────────────────────────────────────────────
+
+/** Context passed to run parsing when inside a w:ins or w:del wrapper. */
+export interface RevisionContext {
+	readonly revisionId: string;
+	readonly author: string;
+	readonly date: string;
+	readonly type: 'insertion' | 'deletion';
+}
 
 // ─── Run Parsing ───────────────────────────────────────────────────────────
 
@@ -66,10 +85,44 @@ export function parseRun(el: Element): ReturnType<typeof createRun> {
 /**
  * Parse all inline content of a w:r, returning the run and any
  * break elements that should be siblings (page/column breaks).
+ *
+ * When `revisionContext` is provided (from a w:ins or w:del wrapper),
+ * the revision info is attached to the run's properties.
  */
-export function parseRunWithBreaks(el: Element): JPInlineNode[] {
+export function parseRunWithBreaks(el: Element, revisionContext?: RevisionContext): JPInlineNode[] {
 	const rPr = getFirstChild(el, NS.w, 'rPr');
-	const properties = rPr ? parseRunProperties(rPr) : {};
+	let properties = rPr ? parseRunProperties(rPr) : {};
+
+	// Attach revision info from w:ins/w:del wrapper
+	if (revisionContext) {
+		const revision: JPRevisionInfo = {
+			revisionId: revisionContext.revisionId,
+			author: revisionContext.author,
+			date: revisionContext.date,
+			type: revisionContext.type,
+		};
+		properties = { ...properties, revision };
+	}
+
+	// Check for w:rPrChange inside rPr (format change tracking)
+	if (rPr && !revisionContext) {
+		const rPrChange = getFirstChild(rPr, NS.w, 'rPrChange');
+		if (rPrChange) {
+			const changeId = attrNS(rPrChange, NS.w, 'id') || generateId();
+			const changeAuthor = attrNS(rPrChange, NS.w, 'author') || '';
+			const changeDate = attrNS(rPrChange, NS.w, 'date') || '';
+			const revision: JPRevisionInfo = {
+				revisionId: changeId,
+				author: changeAuthor,
+				date: changeDate,
+				type: 'formatChange',
+			};
+			// Parse previous properties from rPrChange > rPr
+			const prevRPr = getFirstChild(rPrChange, NS.w, 'rPr');
+			const previousProperties = prevRPr ? parseRunProperties(prevRPr) : {};
+			properties = { ...properties, revision, previousProperties };
+		}
+	}
 
 	const result: JPInlineNode[] = [];
 	let textChildren: ReturnType<typeof createText>[] = [];
@@ -112,6 +165,26 @@ export function parseRunWithBreaks(el: Element): JPInlineNode[] {
 				break;
 			case 'cr':
 				textChildren.push(createText(generateId(), '\n'));
+				break;
+			case 'footnoteReference': {
+				const fnId = attrNS(ce, NS.w, 'id');
+				if (fnId && fnId !== '-1' && fnId !== '0') {
+					flushRun();
+					result.push(createFootnoteRef(fnId));
+				}
+				break;
+			}
+			case 'endnoteReference': {
+				const enId = attrNS(ce, NS.w, 'id');
+				if (enId && enId !== '-1' && enId !== '0') {
+					flushRun();
+					result.push(createEndnoteRef(enId));
+				}
+				break;
+			}
+			case 'fldChar':
+				break;
+			case 'instrText':
 				break;
 		}
 	}
@@ -164,7 +237,13 @@ export function parseRunProperties(el: Element): JPRunProperties {
 	const color = getFirstChild(el, NS.w, 'color');
 	if (color) {
 		const val = wVal(color);
-		if (val && val !== 'auto') props.color = val;
+		const themeColor = attrNS(color, NS.w, 'themeColor');
+		if (val && val !== 'auto') {
+			props.color = val;
+		} else if (themeColor) {
+			// Store theme color reference for later resolution
+			props.color = themeColor;
+		}
 	}
 
 	const highlight = getFirstChild(el, NS.w, 'highlight');

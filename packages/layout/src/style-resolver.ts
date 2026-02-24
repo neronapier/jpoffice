@@ -93,9 +93,9 @@ export function resolveRunStyle(
 		doubleStrikethrough: merged.doubleStrikethrough ?? DEFAULT_RUN.doubleStrikethrough,
 		superscript: merged.superscript ?? DEFAULT_RUN.superscript,
 		subscript: merged.subscript ?? DEFAULT_RUN.subscript,
-		color: merged.color ? `#${merged.color}` : DEFAULT_RUN.color,
+		color: merged.color ? ensureHashPrefix(merged.color) : DEFAULT_RUN.color,
 		backgroundColor: merged.backgroundColor
-			? `#${merged.backgroundColor}`
+			? ensureHashPrefix(merged.backgroundColor)
 			: DEFAULT_RUN.backgroundColor,
 		highlight: merged.highlight ?? DEFAULT_RUN.highlight,
 		allCaps: merged.allCaps ?? DEFAULT_RUN.allCaps,
@@ -159,6 +159,10 @@ export function resolveParagraphLayout(
 				? -twipsToPx(indent.hanging)
 				: 0,
 	};
+}
+
+function ensureHashPrefix(color: string): string {
+	return color.startsWith('#') ? color : `#${color}`;
 }
 
 function stripUndefined(obj: Record<string, unknown>): Record<string, unknown> {
