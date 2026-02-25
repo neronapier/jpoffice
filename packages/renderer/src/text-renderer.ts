@@ -59,7 +59,18 @@ export class TextRenderer {
 
 		ctx.save();
 		ctx.font = TextRenderer.buildFont(style);
-		ctx.fillStyle = style.color;
+
+		// Revision-aware color: insertions use author color, deletions use red with transparency
+		if (style.revision) {
+			if (style.revision.type === 'deletion') {
+				ctx.fillStyle = '#D32F2F';
+				ctx.globalAlpha = 0.6;
+			} else {
+				ctx.fillStyle = style.revision.color;
+			}
+		} else {
+			ctx.fillStyle = style.color;
+		}
 		ctx.textBaseline = 'alphabetic';
 
 		// Superscript/subscript offset
@@ -117,18 +128,29 @@ export class TextRenderer {
 		const lineEnd = x + rect.width;
 
 		ctx.save();
-		ctx.strokeStyle = style.color;
+		// Revision-aware decoration color
+		if (style.revision?.type === 'deletion') {
+			ctx.strokeStyle = '#D32F2F';
+		} else if (style.revision) {
+			ctx.strokeStyle = style.revision.color;
+		} else {
+			ctx.strokeStyle = style.color;
+		}
+
+		// Revision: insertion → underline, deletion → strikethrough
+		const effectiveUnderline = style.revision?.type === 'insertion' ? 'single' : style.underline;
+		const effectiveStrikethrough = style.revision?.type === 'deletion' ? true : style.strikethrough;
 
 		// Underline
-		if (style.underline && style.underline !== 'none') {
+		if (effectiveUnderline && effectiveUnderline !== 'none') {
 			const underlineY = lineY + baseline + 2;
-			ctx.lineWidth = style.underline === 'double' || style.underline === 'thick' ? 2 : 1;
+			ctx.lineWidth = effectiveUnderline === 'double' || effectiveUnderline === 'thick' ? 2 : 1;
 			ctx.beginPath();
 			ctx.moveTo(x, underlineY);
 			ctx.lineTo(lineEnd, underlineY);
 			ctx.stroke();
 
-			if (style.underline === 'double') {
+			if (effectiveUnderline === 'double') {
 				ctx.beginPath();
 				ctx.moveTo(x, underlineY + 2);
 				ctx.lineTo(lineEnd, underlineY + 2);
@@ -137,7 +159,7 @@ export class TextRenderer {
 		}
 
 		// Strikethrough
-		if (style.strikethrough || style.doubleStrikethrough) {
+		if (effectiveStrikethrough || style.doubleStrikethrough) {
 			const strikeY = lineY + baseline - style.fontSize * 0.3;
 			ctx.lineWidth = 1;
 			ctx.beginPath();

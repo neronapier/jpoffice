@@ -20,6 +20,15 @@ function makeCanvasContext(): CanvasRenderingContext2D {
 		fillRect: vi.fn(),
 		strokeRect: vi.fn(),
 		fillText: vi.fn(),
+		beginPath: vi.fn(),
+		moveTo: vi.fn(),
+		lineTo: vi.fn(),
+		stroke: vi.fn(),
+		rect: vi.fn(),
+		clip: vi.fn(),
+		translate: vi.fn(),
+		rotate: vi.fn(),
+		scale: vi.fn(),
 		fillStyle: '',
 		strokeStyle: '',
 		lineWidth: 1,
@@ -151,7 +160,24 @@ describe('ImageRenderer', () => {
 		renderer.renderImage(ctx, image, 0, 0);
 		mockImageInstances[0].onerror?.();
 
-		// After error, should allow retry (new Image created)
+		// After error, renders error placeholder (no retry until clearCache)
+		renderer.renderImage(ctx, image, 0, 0);
+		expect(mockImageInstances).toHaveLength(1);
+		// Error placeholder draws an X shape
+		expect(ctx.beginPath).toHaveBeenCalled();
+		expect(ctx.stroke).toHaveBeenCalled();
+	});
+
+	it('retries image load after clearCache on error', () => {
+		const renderer = new ImageRenderer();
+		const ctx = makeCanvasContext();
+		const image = makeLayoutImage();
+
+		renderer.renderImage(ctx, image, 0, 0);
+		mockImageInstances[0].onerror?.();
+
+		// Clear cache resets error tracking
+		renderer.clearCache();
 		renderer.renderImage(ctx, image, 0, 0);
 		expect(mockImageInstances).toHaveLength(2);
 	});

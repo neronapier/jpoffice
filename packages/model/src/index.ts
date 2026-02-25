@@ -119,6 +119,10 @@ export type {
 	JPHeaderFooterType,
 	JPHeaderFooterRef,
 	JPSectionColumns,
+	JPWatermark,
+	JPPageBorders,
+	JPPageBorderSide,
+	JPLineNumbering,
 } from './properties/section-props';
 export { DEFAULT_SECTION_PROPERTIES } from './properties/section-props';
 

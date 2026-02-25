@@ -180,6 +180,18 @@ export class ContentStreamBuilder {
 		return this;
 	}
 
+	/** Set external graphics state (gs) — used for opacity, blending, etc. */
+	setExtGState(name: string): this {
+		this.parts.push(`${name} gs`);
+		return this;
+	}
+
+	/** Append a raw operator string. */
+	raw(op: string): this {
+		this.parts.push(op);
+		return this;
+	}
+
 	/** Build the content stream as a string. */
 	build(): string {
 		return this.parts.join('\n');

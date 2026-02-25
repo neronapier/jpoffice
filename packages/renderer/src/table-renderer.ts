@@ -1,5 +1,5 @@
 import type { LayoutTable, LayoutTableCell } from '@jpoffice/layout';
-import { isLayoutParagraph } from '@jpoffice/layout';
+import { isLayoutParagraph, isLayoutTable } from '@jpoffice/layout';
 import type { JPBorderDef } from '@jpoffice/model';
 import type { TextRenderer } from './text-renderer';
 
@@ -56,6 +56,8 @@ export class TableRenderer {
 						offsetY + cell.contentRect.y,
 					);
 				}
+			} else if (isLayoutTable(block)) {
+				this.renderTable(ctx, block, offsetX + cell.contentRect.x, offsetY + cell.contentRect.y);
 			}
 		}
 
@@ -83,11 +85,68 @@ export class TableRenderer {
 	): void {
 		if (border && border.style === 'none') return;
 		ctx.strokeStyle = border?.color ? `#${border.color}` : '#000000';
-		ctx.lineWidth = border?.width ? border.width / 8 : 0.5;
-		ctx.beginPath();
-		ctx.moveTo(x1, y1);
-		ctx.lineTo(x2, y2);
-		ctx.stroke();
+		const lineWidth = border?.width ? border.width / 8 : 0.5;
+		ctx.lineWidth = lineWidth;
+
+		// Apply border style (dash patterns)
+		this.applyBorderStyle(ctx, border?.style, lineWidth);
+
+		if (border?.style === 'double') {
+			// Draw two lines with gap for double border
+			const gap = lineWidth * 1.5;
+			const isHorizontal = Math.abs(y1 - y2) < 0.5;
+			if (isHorizontal) {
+				ctx.beginPath();
+				ctx.moveTo(x1, y1 - gap / 2);
+				ctx.lineTo(x2, y2 - gap / 2);
+				ctx.stroke();
+				ctx.beginPath();
+				ctx.moveTo(x1, y1 + gap / 2);
+				ctx.lineTo(x2, y2 + gap / 2);
+				ctx.stroke();
+			} else {
+				ctx.beginPath();
+				ctx.moveTo(x1 - gap / 2, y1);
+				ctx.lineTo(x2 - gap / 2, y2);
+				ctx.stroke();
+				ctx.beginPath();
+				ctx.moveTo(x1 + gap / 2, y1);
+				ctx.lineTo(x2 + gap / 2, y2);
+				ctx.stroke();
+			}
+		} else {
+			ctx.beginPath();
+			ctx.moveTo(x1, y1);
+			ctx.lineTo(x2, y2);
+			ctx.stroke();
+		}
+
+		// Reset dash
+		ctx.setLineDash([]);
+	}
+
+	private applyBorderStyle(
+		ctx: CanvasRenderingContext2D,
+		style: string | undefined,
+		width: number,
+	): void {
+		switch (style) {
+			case 'dashed':
+				ctx.setLineDash([width * 3, width * 2]);
+				break;
+			case 'dotted':
+				ctx.setLineDash([width, width]);
+				break;
+			case 'dashDotDot':
+				ctx.setLineDash([width * 3, width, width, width, width, width]);
+				break;
+			case 'dashDot':
+				ctx.setLineDash([width * 3, width, width, width]);
+				break;
+			default:
+				ctx.setLineDash([]);
+				break;
+		}
 	}
 
 	private renderBorders(

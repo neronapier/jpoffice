@@ -7,7 +7,10 @@ import type {
 	JPHeaderFooterRef,
 	JPHeaderFooterType,
 	JPInlineNode,
+	JPLineNumbering,
 	JPOrientation,
+	JPPageBorderSide,
+	JPPageBorders,
 	JPSection,
 	JPSectionColumns,
 	JPSectionProperties,
@@ -390,6 +393,44 @@ function parseSectionProperties(
 		if (refs.length > 0) footerReferences = refs;
 	}
 
+	// Page borders
+	let pageBorders: JPPageBorders | undefined;
+	const pgBorders = getFirstChild(el, NS.w, 'pgBorders');
+	if (pgBorders) {
+		const parseBorderSide = (side: Element | null): JPPageBorderSide | undefined => {
+			if (!side) return undefined;
+			return {
+				style: attrNS(side, NS.w, 'val') ?? 'single',
+				color: attrNS(side, NS.w, 'color') ?? '#000000',
+				width: intOrDefault(attrNS(side, NS.w, 'sz'), 4),
+				space: intOrDefault(attrNS(side, NS.w, 'space'), 0),
+			};
+		};
+		const display = (attrNS(pgBorders, NS.w, 'display') ?? 'allPages') as JPPageBorders['display'];
+		const offsetFrom = (attrNS(pgBorders, NS.w, 'offsetFrom') ??
+			'page') as JPPageBorders['offsetFrom'];
+		pageBorders = {
+			top: parseBorderSide(getFirstChild(pgBorders, NS.w, 'top')),
+			bottom: parseBorderSide(getFirstChild(pgBorders, NS.w, 'bottom')),
+			left: parseBorderSide(getFirstChild(pgBorders, NS.w, 'left')),
+			right: parseBorderSide(getFirstChild(pgBorders, NS.w, 'right')),
+			display,
+			offsetFrom,
+		};
+	}
+
+	// Line numbering
+	let lineNumbering: JPLineNumbering | undefined;
+	const lnNumType = getFirstChild(el, NS.w, 'lnNumType');
+	if (lnNumType) {
+		lineNumbering = {
+			start: intOrDefault(attrNS(lnNumType, NS.w, 'start'), 1),
+			countBy: intOrDefault(attrNS(lnNumType, NS.w, 'countBy'), 1),
+			restart: (attrNS(lnNumType, NS.w, 'restart') ?? 'newPage') as JPLineNumbering['restart'],
+			distance: intOrDefault(attrNS(lnNumType, NS.w, 'distance'), 360),
+		};
+	}
+
 	const result: JPSectionProperties = {
 		pageSize: { width, height },
 		margins,
@@ -397,6 +438,8 @@ function parseSectionProperties(
 		...(columns ? { columns } : {}),
 		...(headerReferences ? { headerReferences } : {}),
 		...(footerReferences ? { footerReferences } : {}),
+		...(pageBorders ? { pageBorders } : {}),
+		...(lineNumbering ? { lineNumbering } : {}),
 	};
 
 	return result;

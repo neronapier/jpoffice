@@ -33,7 +33,7 @@ import { PdfWriter } from './pdf-writer';
 import { ShapePainter } from './shape-painter';
 import { TablePainter } from './table-painter';
 import { TextPainter } from './text-painter';
-import { pxToPt, round } from './unit-utils';
+import { colorToRgb, escapePdfString, pxToPt, round } from './unit-utils';
 
 export interface PdfExportOptions {
 	title?: string;
@@ -179,7 +179,14 @@ export class PdfDocument {
 				// Render footnotes on the last page (re-render pass)
 				if (footnotes && footnotes.length > 0 && pi === layoutResult.pages.length - 1) {
 					const reHeightPt = round(pxToPt(page.height));
-					this.renderFootnotes(stream, textPainter, footnotes, round(pxToPt(page.width)), reHeightPt, page);
+					this.renderFootnotes(
+						stream,
+						textPainter,
+						footnotes,
+						round(pxToPt(page.width)),
+						reHeightPt,
+						page,
+					);
 				}
 
 				const streamRef = writer.addStream(stream.build());
@@ -395,6 +402,40 @@ export class PdfDocument {
 	): void {
 		const heightPt = round(pxToPt(page.height));
 
+		// Render watermark (behind all content)
+		if (page.watermark) {
+			const wm = page.watermark;
+			const [wr, wg, wb] = colorToRgb(wm.color);
+			const centerXPt = round(pxToPt(page.width / 2));
+			const centerYPt = round(pxToPt(page.height / 2));
+			const pdfCenterY = heightPt - centerYPt;
+			const rad = (wm.rotation * Math.PI) / 180;
+			const cosR = round(Math.cos(rad), 4);
+			const sinR = round(Math.sin(rad), 4);
+
+			stream.save();
+			// Translate to center, rotate
+			stream.setTransform(cosR, sinR, -sinR, cosR, centerXPt, pdfCenterY);
+			// Approximate opacity via fill color (PDF gs opacity needs ExtGState resource)
+			stream
+				.beginText()
+				.setFont('/F1', round(wm.fontSize))
+				.setFillColor(
+					Math.min(1, wr + (1 - wr) * (1 - wm.opacity)),
+					Math.min(1, wg + (1 - wg) * (1 - wm.opacity)),
+					Math.min(1, wb + (1 - wb) * (1 - wm.opacity)),
+				)
+				.setTextPosition(0, 0)
+				.showText(escapePdfString(wm.text))
+				.endText();
+			stream.restore();
+		}
+
+		// Render page borders
+		if (page.pageBorders) {
+			this.renderPageBorders(page, stream, heightPt);
+		}
+
 		// Block positions (block.rect.x/y) already include contentArea offset
 		// (margin), so main blocks use offset 0. Header/footer blocks are
 		// positioned relative to contentArea, so they need the margin offset.
@@ -431,6 +472,11 @@ export class PdfDocument {
 				heightPt,
 				mcidCounter,
 			);
+		}
+
+		// Render line numbers in left margin
+		if (page.lineNumbering) {
+			this.renderLineNumbers(page, stream, heightPt);
 		}
 
 		// Render footer if present
@@ -512,8 +558,53 @@ export class PdfDocument {
 
 		const xobjName = images.addImage(image.src, asset.data, widthPt, heightPt, mimeType);
 
-		// Draw the image using cm (transformation matrix) + Do operator
 		stream.save();
+
+		// Apply crop via clip rect
+		const crop = image.crop;
+		if (crop && (crop.top > 0 || crop.right > 0 || crop.bottom > 0 || crop.left > 0)) {
+			const cl = xPt + widthPt * crop.left;
+			const cb = yPt + heightPt * crop.bottom;
+			const cw = widthPt * (1 - crop.left - crop.right);
+			const ch = heightPt * (1 - crop.top - crop.bottom);
+			stream.rect(round(cl), round(cb), round(cw), round(ch));
+			stream.raw('W n\n');
+		}
+
+		// Apply rotation around image center
+		const rotation = image.rotation ?? 0;
+		const flipH = image.flipH ?? false;
+		const flipV = image.flipV ?? false;
+
+		if (rotation !== 0 || flipH || flipV) {
+			const cxPt = xPt + widthPt / 2;
+			const cyPt = yPt + heightPt / 2;
+			// Translate to center, apply transforms, translate back
+			let scaleX = flipH ? -1 : 1;
+			let scaleY = flipV ? -1 : 1;
+			if (rotation !== 0) {
+				const rad = (rotation * Math.PI) / 180;
+				const cosR = round(Math.cos(rad), 4);
+				const sinR = round(Math.sin(rad), 4);
+				// Combined: translate(cx,cy) * rotate * scale * translate(-cx,-cy) * scale(w,h) * translate(tx,ty)
+				// Simplified: just rotate around center
+				stream.setTransform(1, 0, 0, 1, cxPt, cyPt);
+				stream.setTransform(
+					round(cosR * scaleX),
+					round(sinR * scaleX),
+					round(-sinR * scaleY),
+					round(cosR * scaleY),
+					0,
+					0,
+				);
+				stream.setTransform(1, 0, 0, 1, -cxPt, -cyPt);
+			} else {
+				// Flip only (no rotation)
+				stream.setTransform(scaleX, 0, 0, scaleY, cxPt * (1 - scaleX), cyPt * (1 - scaleY));
+			}
+		}
+
+		// Draw the image using cm (transformation matrix) + Do operator
 		stream.setTransform(widthPt, 0, 0, heightPt, xPt, yPt);
 		stream.drawXObject(xobjName);
 		stream.restore();
@@ -547,6 +638,7 @@ export class PdfDocument {
 					cell,
 					stream,
 					textPainter,
+					tablePainter,
 					contentX,
 					contentY,
 					row.isHeader,
@@ -567,6 +659,7 @@ export class PdfDocument {
 		cell: LayoutTableCell,
 		stream: ContentStreamBuilder,
 		textPainter: TextPainter,
+		tablePainter: TablePainter,
 		contentX: number,
 		contentY: number,
 		isHeader: boolean,
@@ -591,12 +684,108 @@ export class PdfDocument {
 				if (mcidCounter) {
 					stream.endMarkedContent();
 				}
+			} else if (isLayoutTable(block)) {
+				this.renderTable(block, stream, textPainter, tablePainter, contentX + cell.contentRect.x, contentY + cell.contentRect.y, mcidCounter);
 			}
 		}
 
 		if (mcidCounter) {
 			stream.endMarkedContent();
 		}
+	}
+
+	/**
+	 * Render line numbers in the left margin of a page in PDF.
+	 */
+	private renderLineNumbers(
+		page: LayoutPage,
+		stream: ContentStreamBuilder,
+		heightPt: number,
+	): void {
+		const ln = page.lineNumbering;
+		if (!ln) return;
+
+		let lineNum = ln.start;
+		const fontSize = round(pxToPt(9));
+		const numberXPx = page.contentArea.x - ln.distance;
+
+		for (const block of page.blocks) {
+			if (!isLayoutParagraph(block)) continue;
+			for (const line of block.lines) {
+				if (lineNum % ln.countBy === 0) {
+					const xPt = round(pxToPt(numberXPx));
+					const baselineY = pxToPt(block.rect.y + line.rect.y + line.baseline);
+					const pdfY = round(heightPt - baselineY);
+					const numStr = String(lineNum);
+
+					stream
+						.beginText()
+						.setFont('/F1', fontSize)
+						.setFillColor(0.53, 0.53, 0.53) // #888888
+						.setTextPosition(xPt, pdfY)
+						.showText(escapePdfString(numStr))
+						.endText();
+				}
+				lineNum++;
+			}
+		}
+	}
+
+	/**
+	 * Render page borders in PDF.
+	 */
+	private renderPageBorders(
+		page: LayoutPage,
+		stream: ContentStreamBuilder,
+		heightPt: number,
+	): void {
+		const borders = page.pageBorders;
+		if (!borders) return;
+
+		const drawSide = (
+			side: { style: string; color: string; width: number; space: number } | undefined,
+			x1Px: number,
+			y1Px: number,
+			x2Px: number,
+			y2Px: number,
+		) => {
+			if (!side) return;
+			const [r, g, b] = colorToRgb(side.color);
+			const w = round(side.width / 8);
+			stream.save();
+			stream.setStrokeColor(r, g, b);
+			stream.setLineWidth(w);
+			if (side.style === 'dashed') {
+				stream.setDash([3, 2], 0);
+			} else if (side.style === 'dotted') {
+				stream.setDash([1, 1], 0);
+			}
+			stream.moveTo(round(pxToPt(x1Px)), round(heightPt - pxToPt(y1Px)));
+			stream.lineTo(round(pxToPt(x2Px)), round(heightPt - pxToPt(y2Px)));
+			stream.stroke();
+			stream.restore();
+		};
+
+		let bx: number;
+		let by: number;
+		let bw: number;
+		let bh: number;
+		if (borders.offsetFrom === 'text') {
+			bx = page.contentArea.x;
+			by = page.contentArea.y;
+			bw = page.contentArea.width;
+			bh = page.contentArea.height;
+		} else {
+			bx = 0;
+			by = 0;
+			bw = page.width;
+			bh = page.height;
+		}
+
+		drawSide(borders.top, bx, by, bx + bw, by);
+		drawSide(borders.bottom, bx, by + bh, bx + bw, by + bh);
+		drawSide(borders.left, bx, by, bx, by + bh);
+		drawSide(borders.right, bx + bw, by, bx + bw, by + bh);
 	}
 
 	/**

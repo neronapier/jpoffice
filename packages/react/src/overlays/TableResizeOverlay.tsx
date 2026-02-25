@@ -50,29 +50,29 @@ export function TableResizeOverlay({ editor, rendererRef, zoom }: TableResizeOve
 
 	const overlayRef = useRef<HTMLDivElement>(null);
 
-	// Cursor management
+	// Cursor management — set cursor directly on <canvas> so inline style wins
 	useEffect(() => {
-		const container = overlayRef.current?.parentElement;
-		if (!container) return;
+		const canvas = rendererRef.current?.getCanvas();
+		if (!canvas) return;
 
 		switch (dragState.kind) {
 			case 'hover-col':
 			case 'drag-col':
-				container.style.cursor = 'col-resize';
+				canvas.style.cursor = 'col-resize';
 				break;
 			case 'hover-row':
 			case 'drag-row':
-				container.style.cursor = 'row-resize';
+				canvas.style.cursor = 'row-resize';
 				break;
 			default:
-				container.style.cursor = '';
+				canvas.style.cursor = '';
 				break;
 		}
 
 		return () => {
-			container.style.cursor = '';
+			if (canvas) canvas.style.cursor = '';
 		};
-	}, [dragState.kind]);
+	}, [dragState.kind, rendererRef]);
 
 	// Hover detection - listen on the parent container
 	const handleMouseMove = useCallback(
@@ -137,9 +137,10 @@ export function TableResizeOverlay({ editor, rendererRef, zoom }: TableResizeOve
 					grid = (tableNode as unknown as { grid: readonly JPTableGridCol[] }).grid;
 				} catch {
 					// Fallback: estimate from layout widths
-					grid = table.rows[0]?.cells.map((cell) => ({
-						width: Math.round(pxToTwips(cell.width)),
-					})) ?? [];
+					grid =
+						table.rows[0]?.cells.map((cell) => ({
+							width: Math.round(pxToTwips(cell.width)),
+						})) ?? [];
 				}
 
 				setDragState({
@@ -275,10 +276,7 @@ export function TableResizeOverlay({ editor, rendererRef, zoom }: TableResizeOve
 
 		if (dragState.kind === 'hover-row') {
 			const { borderVirtualY, pageVirtualX, table } = dragState.result;
-			const { cx: lineLeft, cy } = renderer.virtualToCanvas(
-				pageVirtualX + table.x,
-				borderVirtualY,
-			);
+			const { cx: lineLeft, cy } = renderer.virtualToCanvas(pageVirtualX + table.x, borderVirtualY);
 			const { cx: lineRight } = renderer.virtualToCanvas(
 				pageVirtualX + table.x + table.width,
 				borderVirtualY,
@@ -304,10 +302,7 @@ export function TableResizeOverlay({ editor, rendererRef, zoom }: TableResizeOve
 			const canvasRect = canvas.getBoundingClientRect();
 			const dragX = dragState.currentCanvasX - canvasRect.left;
 			const { cy: lineTop } = renderer.virtualToCanvas(0, pageVirtualY + table.y);
-			const { cy: lineBottom } = renderer.virtualToCanvas(
-				0,
-				pageVirtualY + table.y + table.height,
-			);
+			const { cy: lineBottom } = renderer.virtualToCanvas(0, pageVirtualY + table.y + table.height);
 
 			return (
 				<div
@@ -329,10 +324,7 @@ export function TableResizeOverlay({ editor, rendererRef, zoom }: TableResizeOve
 			const canvasRect = canvas.getBoundingClientRect();
 			const dragY = dragState.currentCanvasY - canvasRect.top;
 			const { cx: lineLeft } = renderer.virtualToCanvas(pageVirtualX + table.x, 0);
-			const { cx: lineRight } = renderer.virtualToCanvas(
-				pageVirtualX + table.x + table.width,
-				0,
-			);
+			const { cx: lineRight } = renderer.virtualToCanvas(pageVirtualX + table.x + table.width, 0);
 
 			return (
 				<div

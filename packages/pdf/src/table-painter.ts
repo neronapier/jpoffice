@@ -99,6 +99,7 @@ export class TablePainter {
 	 * Paint a single border line segment.
 	 * Skips if the border style is 'none' or not defined.
 	 * Uses border color and width when available, otherwise defaults.
+	 * Supports dashed, dotted, and double border styles.
 	 */
 	private paintBorderLine(
 		border: JPBorderDef | undefined,
@@ -133,7 +134,51 @@ export class TablePainter {
 		const lineWidth = border.width ? border.width / 8 : 0.375;
 		this.stream.setLineWidth(round(lineWidth));
 
-		this.stream.moveTo(x1, y1).lineTo(x2, y2).stroke();
+		// Apply dash pattern for border style
+		this.applyBorderDash(border.style, lineWidth);
+
+		if (border.style === 'double') {
+			// Draw two lines with gap
+			const gap = lineWidth * 1.5;
+			const isHorizontal = Math.abs(y1 - y2) < 0.5;
+			if (isHorizontal) {
+				this.stream.moveTo(x1, y1 - gap / 2).lineTo(x2, y2 - gap / 2).stroke();
+				this.stream.moveTo(x1, y1 + gap / 2).lineTo(x2, y2 + gap / 2).stroke();
+			} else {
+				this.stream.moveTo(x1 - gap / 2, y1).lineTo(x2 - gap / 2, y2).stroke();
+				this.stream.moveTo(x1 + gap / 2, y1).lineTo(x2 + gap / 2, y2).stroke();
+			}
+		} else {
+			this.stream.moveTo(x1, y1).lineTo(x2, y2).stroke();
+		}
+
+		// Reset dash to solid
+		this.stream.raw('[] 0 d\n');
+	}
+
+	/** Set PDF dash pattern for a border style. */
+	private applyBorderDash(style: string | undefined, lineWidth: number): void {
+		switch (style) {
+			case 'dashed':
+				this.stream.raw(`[${round(lineWidth * 3)} ${round(lineWidth * 2)}] 0 d\n`);
+				break;
+			case 'dotted':
+				this.stream.raw(`[${round(lineWidth)} ${round(lineWidth)}] 0 d\n`);
+				break;
+			case 'dashDotDot':
+				this.stream.raw(
+					`[${round(lineWidth * 3)} ${round(lineWidth)} ${round(lineWidth)} ${round(lineWidth)} ${round(lineWidth)} ${round(lineWidth)}] 0 d\n`,
+				);
+				break;
+			case 'dashDot':
+				this.stream.raw(
+					`[${round(lineWidth * 3)} ${round(lineWidth)} ${round(lineWidth)} ${round(lineWidth)}] 0 d\n`,
+				);
+				break;
+			default:
+				// Solid — no dash pattern needed
+				break;
+		}
 	}
 
 	/** Paint all cells in a table (backgrounds + borders). */

@@ -84,6 +84,9 @@ export class CollabProvider {
 	/** Callback when connection status changes. */
 	onStatusChange: ((status: ConnectionStatus) => void) | null = null;
 
+	/** Callback when pending ops count changes. */
+	onPendingOpsChange: ((count: number) => void) | null = null;
+
 	/** Flag to avoid re-entrant apply during remote op application. */
 	private applyingRemote = false;
 
@@ -188,6 +191,7 @@ export class CollabProvider {
 				break;
 			}
 		}
+		this.notifyPendingOpsChange();
 	}
 
 	/**
@@ -195,6 +199,13 @@ export class CollabProvider {
 	 */
 	getVersion(): number {
 		return this.version;
+	}
+
+	/**
+	 * Get the total number of pending (unacknowledged) operations.
+	 */
+	getPendingOpsCount(): number {
+		return this.pendingOps.length + this.buffer.length;
 	}
 
 	// ── Message handling ─────────────────────────────────────────
@@ -248,6 +259,7 @@ export class CollabProvider {
 				break;
 			}
 		}
+		this.notifyPendingOpsChange();
 	}
 
 	/**
@@ -409,6 +421,10 @@ export class CollabProvider {
 		});
 	}
 
+	private notifyPendingOpsChange(): void {
+		this.onPendingOpsChange?.(this.getPendingOpsCount());
+	}
+
 	private setStatus(status: ConnectionStatus): void {
 		if (this.status === status) return;
 		this.status = status;
@@ -427,5 +443,6 @@ export class CollabProvider {
 		this.disconnect();
 		this.onAwarenessChange = null;
 		this.onStatusChange = null;
+		this.onPendingOpsChange = null;
 	}
 }

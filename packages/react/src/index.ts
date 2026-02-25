@@ -40,6 +40,7 @@ export {
 	ContextMenu,
 	contextMenuIcons,
 	getDefaultContextMenuGroups,
+	getImageContextMenuGroups,
 } from './components/ContextMenu';
 export type { ContextMenuProps, ContextMenuItem, ContextMenuGroup } from './components/ContextMenu';
 
@@ -66,6 +67,11 @@ export type { CommentsPanelProps } from './components/CommentsPanel';
 
 export { StylesPanel } from './components/StylesPanel';
 export type { StylesPanelProps } from './components/StylesPanel';
+export { StyleEditDialog } from './components/StyleEditDialog';
+export type { StyleEditDialogProps } from './components/StyleEditDialog';
+
+export { HeaderFooterToolbar } from './components/HeaderFooterToolbar';
+export type { HeaderFooterToolbarProps } from './components/HeaderFooterToolbar';
 
 export { TrackChangesPanel } from './components/TrackChangesPanel';
 export type { TrackChangesPanelProps } from './components/TrackChangesPanel';
@@ -85,9 +91,30 @@ export type { TablePropertiesDialogProps } from './components/TablePropertiesDia
 export { KeyboardShortcutsDialog } from './components/KeyboardShortcutsDialog';
 export type { KeyboardShortcutsDialogProps } from './components/KeyboardShortcutsDialog';
 
+export { ShapePicker } from './components/ShapePicker';
+export type { ShapePickerProps } from './components/ShapePicker';
+
+export { ImagePropertiesDialog } from './components/ImagePropertiesDialog';
+export type { ImagePropertiesDialogProps } from './components/ImagePropertiesDialog';
+
+export { ParagraphPropertiesDialog } from './components/ParagraphPropertiesDialog';
+export type { ParagraphPropertiesDialogProps } from './components/ParagraphPropertiesDialog';
+
+export { TableSizePicker } from './components/TableSizePicker';
+export type { TableSizePickerProps } from './components/TableSizePicker';
+
 // Overlays
+export { TableResizeOverlay } from './overlays/TableResizeOverlay';
+export type { TableResizeOverlayProps } from './overlays/TableResizeOverlay';
+
 export { FloatingToolbar } from './overlays/FloatingToolbar';
 export type { FloatingToolbarProps } from './overlays/FloatingToolbar';
+
+export { ImageResizeOverlay } from './overlays/ImageResizeOverlay';
+export type { ImageResizeOverlayProps } from './overlays/ImageResizeOverlay';
+
+export { ShapeSelectionOverlay } from './overlays/ShapeSelectionOverlay';
+export type { ShapeSelectionOverlayProps } from './overlays/ShapeSelectionOverlay';
 
 // Context
 export { EditorContext } from './context/editor-context';

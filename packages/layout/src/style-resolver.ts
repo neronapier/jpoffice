@@ -83,7 +83,7 @@ export function resolveRunStyle(
 	};
 
 	// 6. Convert to resolved (px-based) style
-	return {
+	const resolved: ResolvedRunStyle = {
 		fontFamily: merged.fontFamily ?? DEFAULT_RUN.fontFamily,
 		fontSize: merged.fontSize ? halfPointsToPx(merged.fontSize) : DEFAULT_RUN.fontSize,
 		bold: merged.bold ?? DEFAULT_RUN.bold,
@@ -103,7 +103,16 @@ export function resolveRunStyle(
 		letterSpacing: merged.letterSpacing
 			? twipsToPx(merged.letterSpacing)
 			: DEFAULT_RUN.letterSpacing,
+		...(merged.revision
+			? {
+					revision: {
+						type: merged.revision.type,
+						color: getRevisionAuthorColor(merged.revision.author),
+					},
+				}
+			: {}),
 	};
+	return resolved;
 }
 
 /**
@@ -173,4 +182,25 @@ function stripUndefined(obj: Record<string, unknown>): Record<string, unknown> {
 		}
 	}
 	return result;
+}
+
+/**
+ * Deterministic author color palette for revision rendering.
+ * Maps author names to consistent colors.
+ */
+const REVISION_AUTHOR_COLORS: readonly string[] = [
+	'#2196F3',
+	'#F44336',
+	'#4CAF50',
+	'#9C27B0',
+	'#FF9800',
+	'#00BCD4',
+];
+
+function getRevisionAuthorColor(author: string): string {
+	let hash = 0;
+	for (let i = 0; i < author.length; i++) {
+		hash = (hash * 31 + author.charCodeAt(i)) | 0;
+	}
+	return REVISION_AUTHOR_COLORS[Math.abs(hash) % REVISION_AUTHOR_COLORS.length];
 }

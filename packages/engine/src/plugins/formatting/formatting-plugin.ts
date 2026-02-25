@@ -311,10 +311,7 @@ export class FormattingPlugin implements JPPlugin {
 	 * Splits runs at selection boundaries so only selected text is affected,
 	 * then updates the selection to cover the newly formatted runs.
 	 */
-	private applyFormatToSelection(
-		editor: JPEditor,
-		props: Partial<JPRunProperties>,
-	): void {
+	private applyFormatToSelection(editor: JPEditor, props: Partial<JPRunProperties>): void {
 		editor.batch(() => {
 			const paths = this.isolateSelectedRuns(editor);
 			if (paths.length === 0) return;
@@ -577,11 +574,7 @@ export class FormattingPlugin implements JPPlugin {
 	/**
 	 * Split the end partial run to isolate the selected portion (start of run to endOffset).
 	 */
-	private isolateEndRun(
-		editor: JPEditor,
-		end: SelectionContext,
-		runPath: JPPath,
-	): JPPath[] {
+	private isolateEndRun(editor: JPEditor, end: SelectionContext, runPath: JPPath): JPPath[] {
 		const textIdx = end.textPath[end.textPath.length - 1];
 		const endOff = end.offset;
 
@@ -621,11 +614,7 @@ export class FormattingPlugin implements JPPlugin {
 	/**
 	 * Split the start partial run to isolate the selected portion (startOffset to end of run).
 	 */
-	private isolateStartRun(
-		editor: JPEditor,
-		start: SelectionContext,
-		runPath: JPPath,
-	): JPPath[] {
+	private isolateStartRun(editor: JPEditor, start: SelectionContext, runPath: JPPath): JPPath[] {
 		const textIdx = start.textPath[start.textPath.length - 1];
 		const startOff = start.offset;
 

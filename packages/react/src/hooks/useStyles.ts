@@ -13,6 +13,14 @@ export interface UseStylesReturn {
 	readonly styles: readonly StyleInfo[];
 	readonly currentStyle: string | undefined;
 	readonly applyStyle: (styleId: string, type?: 'paragraph' | 'character') => void;
+	readonly createStyle: (
+		name: string,
+		type: 'paragraph' | 'character',
+		basedOn?: string,
+		properties?: Record<string, unknown>,
+	) => void;
+	readonly modifyStyle: (styleId: string, properties: Record<string, unknown>) => void;
+	readonly deleteStyle: (styleId: string) => void;
 }
 
 export function useStyles(editor: JPEditor | null): UseStylesReturn {
@@ -60,5 +68,34 @@ export function useStyles(editor: JPEditor | null): UseStylesReturn {
 		[editor],
 	);
 
-	return { styles, currentStyle, applyStyle };
+	const createStyle = useCallback(
+		(
+			name: string,
+			type: 'paragraph' | 'character',
+			basedOn?: string,
+			properties?: Record<string, unknown>,
+		) => {
+			if (!editor) return;
+			editor.executeCommand('styles.create', { name, type, basedOn, properties: properties ?? {} });
+		},
+		[editor],
+	);
+
+	const modifyStyle = useCallback(
+		(styleId: string, properties: Record<string, unknown>) => {
+			if (!editor) return;
+			editor.executeCommand('styles.modify', { styleId, properties });
+		},
+		[editor],
+	);
+
+	const deleteStyle = useCallback(
+		(styleId: string) => {
+			if (!editor) return;
+			editor.executeCommand('styles.delete', { styleId });
+		},
+		[editor],
+	);
+
+	return { styles, currentStyle, applyStyle, createStyle, modifyStyle, deleteStyle };
 }

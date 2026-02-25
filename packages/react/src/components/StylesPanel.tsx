@@ -8,8 +8,10 @@
 
 import type { JPEditor } from '@jpoffice/engine';
 import type { StyleInfo } from '@jpoffice/engine';
+import { useState } from 'react';
 import type { CSSProperties } from 'react';
 import { useStyles } from '../hooks/useStyles';
+import { StyleEditDialog } from './StyleEditDialog';
 
 /* ------------------------------------------------------------------ */
 /*  Styles                                                             */
@@ -125,6 +127,33 @@ const emptyStyle: CSSProperties = {
 	fontSize: 13,
 };
 
+const newStyleBtnStyle: CSSProperties = {
+	display: 'flex',
+	alignItems: 'center',
+	gap: 6,
+	margin: '8px 16px',
+	padding: '8px 12px',
+	border: '1px dashed #dadce0',
+	borderRadius: 4,
+	background: 'transparent',
+	cursor: 'pointer',
+	fontSize: 13,
+	color: '#1a73e8',
+	width: 'calc(100% - 32px)',
+};
+
+const actionBtnStyle: CSSProperties = {
+	border: 'none',
+	background: 'transparent',
+	cursor: 'pointer',
+	fontSize: 12,
+	color: '#5f6368',
+	padding: '2px 4px',
+	borderRadius: 3,
+	lineHeight: 1,
+	flexShrink: 0,
+};
+
 /* ------------------------------------------------------------------ */
 /*  Props                                                              */
 /* ------------------------------------------------------------------ */
@@ -166,38 +195,64 @@ function formatDescription(info: StyleInfo): string {
 /* ------------------------------------------------------------------ */
 
 export function StylesPanel({ editor, onClose }: StylesPanelProps) {
-	const { styles, currentStyle, applyStyle } = useStyles(editor);
+	const { styles, currentStyle, applyStyle, deleteStyle } = useStyles(editor);
+	const [dialogStyle_, setDialogStyle] = useState<StyleInfo | null | undefined>(undefined);
+	// undefined = closed, null = create new, StyleInfo = edit existing
 
 	// Separate paragraph and character styles
 	const paragraphStyles = styles.filter((s) => s.type === 'paragraph');
 	const characterStyles = styles.filter((s) => s.type === 'character');
 
+	const handleDelete = (info: StyleInfo) => {
+		if (info.builtIn) return;
+		deleteStyle(info.id);
+	};
+
 	const renderStyleItem = (info: StyleInfo) => {
 		const isActive = info.id === currentStyle;
 		return (
-			<button
-				key={info.id}
-				type="button"
-				style={isActive ? styleItemActiveStyle : styleItemStyle}
-				onClick={() => applyStyle(info.id, info.type)}
-				onMouseEnter={(e) => {
-					if (!isActive) {
-						(e.currentTarget as HTMLButtonElement).style.background = '#f8f9fa';
-					}
-				}}
-				onMouseLeave={(e) => {
-					if (!isActive) {
-						(e.currentTarget as HTMLButtonElement).style.background = '';
-					}
-				}}
-			>
-				<div style={info.inUse ? inUseDotStyle : notInUseDotStyle} />
-				<div style={stylePreviewStyle}>
-					<div style={{ ...styleNameStyle, ...buildPreviewStyle(info) }}>{info.name}</div>
-					<div style={styleMetaStyle}>{formatDescription(info)}</div>
-				</div>
-				<span style={styleTypeBadgeStyle}>{info.type === 'paragraph' ? 'P' : 'C'}</span>
-			</button>
+			<div key={info.id} style={{ display: 'flex', alignItems: 'center' }}>
+				<button
+					type="button"
+					style={{ ...(isActive ? styleItemActiveStyle : styleItemStyle), flex: 1 }}
+					onClick={() => applyStyle(info.id, info.type)}
+					onMouseEnter={(e) => {
+						if (!isActive) {
+							(e.currentTarget as HTMLButtonElement).style.background = '#f8f9fa';
+						}
+					}}
+					onMouseLeave={(e) => {
+						if (!isActive) {
+							(e.currentTarget as HTMLButtonElement).style.background = '';
+						}
+					}}
+				>
+					<div style={info.inUse ? inUseDotStyle : notInUseDotStyle} />
+					<div style={stylePreviewStyle}>
+						<div style={{ ...styleNameStyle, ...buildPreviewStyle(info) }}>{info.name}</div>
+						<div style={styleMetaStyle}>{formatDescription(info)}</div>
+					</div>
+					<span style={styleTypeBadgeStyle}>{info.type === 'paragraph' ? 'P' : 'C'}</span>
+				</button>
+				<button
+					type="button"
+					style={actionBtnStyle}
+					onClick={() => setDialogStyle(info)}
+					title="Edit style"
+				>
+					&#9998;
+				</button>
+				{!info.builtIn && (
+					<button
+						type="button"
+						style={{ ...actionBtnStyle, color: '#d93025' }}
+						onClick={() => handleDelete(info)}
+						title="Delete style"
+					>
+						&#10005;
+					</button>
+				)}
+			</div>
 		);
 	};
 
@@ -213,6 +268,10 @@ export function StylesPanel({ editor, onClose }: StylesPanelProps) {
 
 			{/* Body */}
 			<div style={bodyStyle}>
+				<button type="button" style={newStyleBtnStyle} onClick={() => setDialogStyle(null)}>
+					+ New Style
+				</button>
+
 				{paragraphStyles.length === 0 && characterStyles.length === 0 ? (
 					<div style={emptyStyle}>No styles available.</div>
 				) : (
@@ -254,6 +313,16 @@ export function StylesPanel({ editor, onClose }: StylesPanelProps) {
 					</>
 				)}
 			</div>
+
+			{/* Style Edit Dialog */}
+			{dialogStyle_ !== undefined && (
+				<StyleEditDialog
+					editor={editor}
+					editStyle={dialogStyle_}
+					allStyles={styles}
+					onClose={() => setDialogStyle(undefined)}
+				/>
+			)}
 		</div>
 	);
 }

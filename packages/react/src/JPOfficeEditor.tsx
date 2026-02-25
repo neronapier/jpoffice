@@ -25,7 +25,7 @@ import {
 	TrackChangesPlugin,
 	registerBuiltinCommands,
 } from '@jpoffice/engine';
-import type { FindReplaceState, SearchMatch } from '@jpoffice/engine';
+import type { FindReplaceState, SearchMatch, SpellCheckState } from '@jpoffice/engine';
 import { getParagraphsInRange } from '@jpoffice/engine';
 import type { JPDocument, JPParagraph, JPSectionProperties } from '@jpoffice/model';
 import {
@@ -47,17 +47,21 @@ import { CommentsPanel } from './components/CommentsPanel';
 import {
 	ContextMenu,
 	getDefaultContextMenuGroups,
+	getImageContextMenuGroups,
 	getTableContextMenuGroups,
 } from './components/ContextMenu';
 import { EditorCanvas } from './components/EditorCanvas';
 import { EquationEditor } from './components/EquationEditor';
 import { FindReplaceBar } from './components/FindReplaceBar';
 import { FootnotePanel } from './components/FootnotePanel';
+import { HeaderFooterToolbar } from './components/HeaderFooterToolbar';
+import { ImagePropertiesDialog } from './components/ImagePropertiesDialog';
 import { KeyboardShortcutsDialog } from './components/KeyboardShortcutsDialog';
 import { LinkDialog } from './components/LinkDialog';
 import { MenuBar } from './components/MenuBar';
 import { ModePanel } from './components/ModeButtons';
 import { PageSetupDialog } from './components/PageSetupDialog';
+import { ParagraphPropertiesDialog } from './components/ParagraphPropertiesDialog';
 import { Ruler } from './components/Ruler';
 import { ScrollContainer } from './components/ScrollContainer';
 import { Sidebar } from './components/Sidebar';
@@ -69,11 +73,13 @@ import { Toolbar } from './components/Toolbar';
 import { TrackChangesPanel } from './components/TrackChangesPanel';
 import { EditorContext } from './context/editor-context';
 import type { EditorContextValue } from './context/editor-context';
+import { useAnnounce } from './hooks/useAnnounce';
 import { useEditor } from './hooks/useEditor';
 import { useEditorState } from './hooks/useEditorState';
 import { useLayout } from './hooks/useLayout';
 import { useSelectionRect } from './hooks/useSelectionRect';
 import { FloatingToolbar } from './overlays/FloatingToolbar';
+import { ImageResizeOverlay } from './overlays/ImageResizeOverlay';
 import { TableResizeOverlay } from './overlays/TableResizeOverlay';
 import { ThemeProvider } from './theme/theme-provider';
 import type { ThemeMode } from './theme/theme-provider';
@@ -103,6 +109,10 @@ export interface JPOfficeEditorProps {
 	onDownloadPdf?: () => void;
 	/** Theme mode: 'light', 'dark', or 'auto' (detects system preference). Defaults to 'light'. */
 	theme?: ThemeMode;
+	/** Author name for track changes / suggesting mode. Defaults to 'Anonymous'. */
+	author?: string;
+	/** Remote user cursors for collaboration rendering. */
+	remoteCursors?: readonly import('@jpoffice/renderer').RemoteCursorInfo[];
 	className?: string;
 	style?: CSSProperties;
 	onEditorReady?: (editor: JPEditor) => void;
@@ -168,6 +178,8 @@ interface EditorInnerProps {
 	showMenuBar: boolean;
 	showSidebar: boolean;
 	title: string;
+	author?: string;
+	remoteCursors?: readonly import('@jpoffice/renderer').RemoteCursorInfo[];
 	onTitleChange?: (title: string) => void;
 	onMenuAction?: (menu: string, action: string) => void;
 	onShare?: () => void;
@@ -186,6 +198,8 @@ function EditorInner({
 	showMenuBar,
 	showSidebar,
 	title,
+	author: authorProp,
+	remoteCursors,
 	onTitleChange,
 	onMenuAction,
 	onShare,
@@ -197,25 +211,55 @@ function EditorInner({
 	const editor = useEditor();
 	const state = useEditorState();
 	const layout = useLayout();
+	const { announce, AnnouncerRegion } = useAnnounce();
 	const [mode, setMode] = useState<EditorMode>(readOnly ? 'viewing' : 'editing');
 	const [zoom, setZoom] = useState(100);
 	const [sidebarOpen, setSidebarOpen] = useState(true);
-	const [contextMenu, setContextMenu] = useState<{ x: number; y: number; isInTable: boolean } | null>(null);
+	const [contextMenu, setContextMenu] = useState<{
+		x: number;
+		y: number;
+		isInTable: boolean;
+		isOnImage: boolean;
+		imagePath?: readonly number[];
+	} | null>(null);
 	const [linkDialogOpen, setLinkDialogOpen] = useState(false);
 	const [findReplaceOpen, setFindReplaceOpen] = useState(false);
 	const [findShowReplace, setFindShowReplace] = useState(false);
 	const [findMatches, setFindMatches] = useState<readonly SearchMatch[]>([]);
 	const [findCurrentIndex, setFindCurrentIndex] = useState(-1);
 
+	// Spellcheck errors for squiggly-line rendering
+	const [spellErrors, setSpellErrors] = useState<SpellCheckState | null>(null);
+
+	// Header/footer editing state
+	const [hfEditState, setHfEditState] = useState<{
+		editing: boolean;
+		zone: 'header' | 'footer' | null;
+	} | null>(null);
+
 	// Panel visibility state
 	const [commentsOpen, setCommentsOpen] = useState(false);
 	const [stylesOpen, setStylesOpen] = useState(false);
 	const [trackChangesOpen, setTrackChangesOpen] = useState(false);
 	const [equationEditorOpen, setEquationEditorOpen] = useState(false);
+	const [equationEditState, setEquationEditState] = useState<{
+		latex: string;
+		display: 'inline' | 'block';
+		path: readonly number[];
+	} | null>(null);
 	const [footnotesOpen, setFootnotesOpen] = useState(false);
 	const [pageSetupOpen, setPageSetupOpen] = useState(false);
 	const [tablePropsOpen, setTablePropsOpen] = useState(false);
 	const [shortcutsOpen, setShortcutsOpen] = useState(false);
+	const [imagePropsOpen, setImagePropsOpen] = useState(false);
+	const [paragraphPropsOpen, setParagraphPropsOpen] = useState(false);
+	const [spellSuggestions, setSpellSuggestions] = useState<{
+		word: string;
+		suggestions: string[];
+		path: readonly number[];
+		offset: number;
+		length: number;
+	} | null>(null);
 
 	// Renderer ref for floating toolbar selection rect
 	const canvasRendererRef = useRef<CanvasRenderer | null>(null);
@@ -223,12 +267,43 @@ function EditorInner({
 	const selectionRect = useSelectionRect(editor, canvasRendererRef);
 	const [paintFormatActive, setPaintFormatActive] = useState(false);
 	const contextMenuGroups = useMemo(() => {
-		const base = getDefaultContextMenuGroups();
-		if (contextMenu?.isInTable) {
-			return [...base, ...getTableContextMenuGroups()];
+		const groups: import('./components/ContextMenu').ContextMenuGroup[] = [];
+
+		// Add spell suggestions at the top
+		if (spellSuggestions && spellSuggestions.suggestions.length > 0) {
+			groups.push({
+				items: spellSuggestions.suggestions.map((s, i) => ({
+					id: `spell.suggest.${i}`,
+					label: s,
+					icon: null,
+				})),
+			});
+			groups.push({
+				items: [
+					{ id: 'spell.addToDictionary', label: 'Agregar al diccionario' },
+					{ id: 'spell.ignoreAll', label: 'Ignorar todas' },
+				],
+			});
+		} else if (spellSuggestions) {
+			groups.push({
+				items: [
+					{ id: 'spell.noSuggestions', label: 'Sin sugerencias', disabled: true },
+					{ id: 'spell.addToDictionary', label: 'Agregar al diccionario' },
+					{ id: 'spell.ignoreAll', label: 'Ignorar todas' },
+				],
+			});
 		}
-		return base;
-	}, [contextMenu?.isInTable]);
+
+		groups.push(...getDefaultContextMenuGroups());
+
+		if (contextMenu?.isOnImage) {
+			groups.push(...getImageContextMenuGroups());
+		}
+		if (contextMenu?.isInTable) {
+			groups.push(...getTableContextMenuGroups());
+		}
+		return groups;
+	}, [contextMenu?.isInTable, contextMenu?.isOnImage, spellSuggestions]);
 
 	const sectionProps = getSectionProps(state.document);
 	const pageWidthPx = twipsToPx(sectionProps.pageSize.width);
@@ -312,7 +387,9 @@ function EditorInner({
 			const twips = Math.round(pxToTwips(px));
 			try {
 				editor.executeCommand('pageSetup.setMargins', { left: twips });
-			} catch { /* command not registered */ }
+			} catch {
+				/* command not registered */
+			}
 		},
 		[editor],
 	);
@@ -321,7 +398,9 @@ function EditorInner({
 			const twips = Math.round(pxToTwips(px));
 			try {
 				editor.executeCommand('pageSetup.setMargins', { right: twips });
-			} catch { /* command not registered */ }
+			} catch {
+				/* command not registered */
+			}
 		},
 		[editor],
 	);
@@ -338,9 +417,25 @@ function EditorInner({
 			const tcPlugin = editor.getPlugin('jpoffice.trackChanges') as TrackChangesPlugin | undefined;
 			if (tcPlugin) {
 				tcPlugin.setTracking(newMode === 'suggesting');
+				if (newMode === 'suggesting') {
+					try {
+						editor.executeCommand('trackChanges.setAuthor', {
+							author: authorProp ?? 'Anonymous',
+						});
+					} catch {
+						/* command not registered */
+					}
+				}
 			}
+			// ARIA announcement for mode change
+			const modeLabels: Record<EditorMode, string> = {
+				editing: 'Editing mode',
+				suggesting: 'Suggesting mode',
+				viewing: 'Viewing mode',
+			};
+			announce(modeLabels[newMode]);
 		},
-		[editor],
+		[editor, authorProp, announce],
 	);
 
 	const toggleSidebar = useCallback(() => {
@@ -432,6 +527,85 @@ function EditorInner({
 		};
 	}, [editor]);
 
+	// Connect SpellcheckPlugin errors callback
+	useEffect(() => {
+		const spPlugin = editor.getPlugin('jpoffice.spellcheck') as SpellcheckPlugin | undefined;
+		if (spPlugin) {
+			spPlugin.onErrorsChange = (scState: SpellCheckState) => {
+				setSpellErrors(scState);
+			};
+		}
+		return () => {
+			if (spPlugin) spPlugin.onErrorsChange = undefined;
+		};
+	}, [editor]);
+
+	// Pass spell errors to renderer
+	useEffect(() => {
+		if (canvasRendererRef.current && spellErrors) {
+			canvasRendererRef.current.setSpellErrors(spellErrors.errors);
+		}
+	}, [spellErrors]);
+
+	// Connect HeaderFooterPlugin edit state callback
+	useEffect(() => {
+		const hfPlugin = editor.getPlugin('jpoffice.headerfooter') as HeaderFooterPlugin | undefined;
+		if (!hfPlugin) return;
+		hfPlugin.onEditStateChange = (state) => {
+			setHfEditState(state.editing ? { editing: true, zone: state.zone } : null);
+		};
+		return () => {
+			hfPlugin.onEditStateChange = undefined;
+		};
+	}, [editor]);
+
+	// Pass header/footer editing state to renderer for dimming
+	useEffect(() => {
+		if (canvasRendererRef.current) {
+			canvasRendererRef.current.setHeaderFooterEditing(
+				hfEditState?.zone ? { zone: hfEditState.zone } : null,
+			);
+			canvasRendererRef.current.render();
+		}
+	}, [hfEditState]);
+
+	// Connect EquationPlugin edit callback (double-click on equation)
+	useEffect(() => {
+		const eqPlugin = editor.getPlugin('jpoffice.equation') as EquationPlugin | undefined;
+		if (eqPlugin) {
+			eqPlugin.onEquationEdit = (equation, path) => {
+				setEquationEditState({
+					latex: equation.latex,
+					display: equation.display,
+					path: [...path],
+				});
+				setEquationEditorOpen(true);
+			};
+		}
+		return () => {
+			if (eqPlugin) eqPlugin.onEquationEdit = undefined;
+		};
+	}, [editor]);
+
+	// Resolve dynamic page fields (PAGE, NUMPAGES) after layout
+	const fieldResolveRef = useRef(0);
+	useEffect(() => {
+		if (!layout) return;
+		const fieldPlugin = editor.getPlugin('jpoffice.field') as FieldPlugin | undefined;
+		if (!fieldPlugin) return;
+		// Prevent infinite loop: only resolve once per layout version
+		if (fieldResolveRef.current === layout.version) return;
+		fieldResolveRef.current = layout.version;
+		fieldPlugin.resolvePageFields(editor, layout.pages);
+	}, [editor, layout]);
+
+	// Pass remote cursors to renderer
+	useEffect(() => {
+		if (canvasRendererRef.current) {
+			canvasRendererRef.current.setRemoteCursors(remoteCursors ?? []);
+		}
+	}, [remoteCursors]);
+
 	const handleFindSearch = useCallback(
 		(term: string, caseSensitive: boolean) => {
 			try {
@@ -516,6 +690,8 @@ function EditorInner({
 		(e: React.MouseEvent) => {
 			e.preventDefault();
 			let isInTable = false;
+			let isOnImage = false;
+			let imagePath: readonly number[] | undefined;
 			const renderer = canvasRendererRef.current;
 			if (renderer) {
 				const canvas = renderer.getCanvas();
@@ -524,11 +700,37 @@ function EditorInner({
 					const canvasX = e.clientX - canvasRect.left;
 					const canvasY = e.clientY - canvasRect.top;
 					isInTable = renderer.findTableAtCanvasCoords(canvasX, canvasY) !== null;
+					const imgResult = renderer.findImageAtCanvasCoords(canvasX, canvasY);
+					isOnImage = imgResult !== null;
+					if (imgResult) {
+						imagePath = imgResult.image.nodePath;
+					}
 				}
 			}
-			setContextMenu({ x: e.clientX, y: e.clientY, isInTable });
+
+			// Check for spell error at cursor position
+			const spPlugin = editor.getPlugin('jpoffice.spellcheck') as SpellcheckPlugin | undefined;
+			const sel = editor.getSelection();
+			if (spPlugin && sel) {
+				const err = spPlugin.getErrorAtPosition(sel.focus.path, sel.focus.offset);
+				if (err) {
+					setSpellSuggestions({
+						word: err.word,
+						suggestions: (err.suggestions ?? []).slice(0, 5),
+						path: [...err.path],
+						offset: err.offset,
+						length: err.length,
+					});
+				} else {
+					setSpellSuggestions(null);
+				}
+			} else {
+				setSpellSuggestions(null);
+			}
+
+			setContextMenu({ x: e.clientX, y: e.clientY, isInTable, isOnImage, imagePath });
 		},
-		[],
+		[editor],
 	);
 
 	const handleContextMenuClose = useCallback(() => {
@@ -537,6 +739,41 @@ function EditorInner({
 
 	const handleContextMenuAction = useCallback(
 		(id: string) => {
+			// Spell check actions
+			if (id.startsWith('spell.suggest.') && spellSuggestions) {
+				const idx = Number(id.replace('spell.suggest.', ''));
+				const replacement = spellSuggestions.suggestions[idx];
+				if (replacement) {
+					try {
+						editor.executeCommand('spellcheck.replaceWord', {
+							path: spellSuggestions.path,
+							offset: spellSuggestions.offset,
+							length: spellSuggestions.length,
+							replacement,
+						});
+					} catch {
+						/* command not registered */
+					}
+				}
+				return;
+			}
+			if (id === 'spell.addToDictionary' && spellSuggestions) {
+				try {
+					editor.executeCommand('spellcheck.addWord', { word: spellSuggestions.word });
+				} catch {
+					/* command not registered */
+				}
+				return;
+			}
+			if (id === 'spell.ignoreAll' && spellSuggestions) {
+				try {
+					editor.executeCommand('spellcheck.ignore', { word: spellSuggestions.word });
+				} catch {
+					/* command not registered */
+				}
+				return;
+			}
+
 			try {
 				switch (id) {
 					case 'cut':
@@ -582,19 +819,46 @@ function EditorInner({
 					case 'table.properties':
 						setTablePropsOpen(true);
 						break;
+					// Image actions
+					case 'image.delete':
+						if (contextMenu?.imagePath) editor.executeCommand('image.delete', { path: [...contextMenu.imagePath] });
+						break;
+					case 'image.resetSize':
+						if (contextMenu?.imagePath) editor.executeCommand('image.resetSize', { path: [...contextMenu.imagePath] });
+						break;
+					case 'image.replace': {
+						pickFile('image/*').then((file) => {
+							if (!file) return;
+							const reader = new FileReader();
+							reader.onload = () => {
+								const dataUrl = reader.result as string;
+								try {
+									if (contextMenu?.imagePath) editor.executeCommand('image.replace', { path: [...contextMenu.imagePath], newSrc: dataUrl, newMimeType: file.type });
+								} catch { /* command not registered */ }
+							};
+							reader.readAsDataURL(file);
+						});
+						break;
+					}
+					case 'image.properties':
+						setImagePropsOpen(true);
+						break;
 				}
 			} catch (e) {
 				console.warn('[JPOffice] Context menu action failed:', id, e);
 			}
 		},
-		[editor],
+		[editor, spellSuggestions, contextMenu],
 	);
 
 	// Panel open handlers for MenuBar
 	const handleOpenComments = useCallback(() => setCommentsOpen(true), []);
 	const handleOpenStyles = useCallback(() => setStylesOpen(true), []);
 	const handleOpenTrackChanges = useCallback(() => setTrackChangesOpen(true), []);
-	const handleOpenEquationEditor = useCallback(() => setEquationEditorOpen(true), []);
+	const handleOpenEquationEditor = useCallback(() => {
+		setEquationEditState(null);
+		setEquationEditorOpen(true);
+	}, []);
 	const handleOpenFootnotes = useCallback(() => setFootnotesOpen(true), []);
 	const handleOpenPageSetup = useCallback(() => setPageSetupOpen(true), []);
 	const handleOpenTableProps = useCallback(() => setTablePropsOpen(true), []);
@@ -603,13 +867,27 @@ function EditorInner({
 	const handleEquationInsert = useCallback(
 		(latex: string, display: 'inline' | 'block') => {
 			setEquationEditorOpen(false);
-			try {
-				editor.executeCommand('equation.insert', { latex, display });
-			} catch {
-				/* command not registered */
+			if (equationEditState) {
+				// Update existing equation
+				try {
+					editor.executeCommand('equation.edit', {
+						path: equationEditState.path,
+						latex,
+					});
+				} catch {
+					/* command not registered */
+				}
+				setEquationEditState(null);
+			} else {
+				// Insert new equation
+				try {
+					editor.executeCommand('equation.insert', { latex, display });
+				} catch {
+					/* command not registered */
+				}
 			}
 		},
-		[editor],
+		[editor, equationEditState],
 	);
 
 	// File action handlers (import/export via dynamic import)
@@ -698,6 +976,7 @@ function EditorInner({
 
 	return (
 		<>
+			<AnnouncerRegion />
 			{/* Skip to content link — visible only on keyboard focus */}
 			<a
 				href="#jpoffice-editor-content"
@@ -800,6 +1079,7 @@ function EditorInner({
 							searchCurrentIndex={findCurrentIndex}
 							onContextMenu={handleContextMenu}
 							rendererRef={canvasRendererRef}
+							hfEditing={!!hfEditState?.zone}
 						/>
 						{/* Floating toolbar on text selection */}
 						{mode !== 'viewing' && (
@@ -809,9 +1089,19 @@ function EditorInner({
 								containerRef={editorContentRef}
 							/>
 						)}
+						{/* Header/Footer editing toolbar */}
+						{hfEditState?.zone && <HeaderFooterToolbar editor={editor} zone={hfEditState.zone} />}
 						{/* Table resize overlay */}
 						{mode !== 'viewing' && (
 							<TableResizeOverlay
+								editor={editor}
+								rendererRef={canvasRendererRef}
+								zoom={zoom / 100}
+							/>
+						)}
+						{/* Image resize overlay */}
+						{mode !== 'viewing' && (
+							<ImageResizeOverlay
 								editor={editor}
 								rendererRef={canvasRendererRef}
 								zoom={zoom / 100}
@@ -871,7 +1161,12 @@ function EditorInner({
 			{equationEditorOpen && (
 				<EquationEditor
 					onInsert={handleEquationInsert}
-					onClose={() => setEquationEditorOpen(false)}
+					onClose={() => {
+						setEquationEditorOpen(false);
+						setEquationEditState(null);
+					}}
+					initialLatex={equationEditState?.latex}
+					initialDisplay={equationEditState?.display}
 				/>
 			)}
 			{pageSetupOpen && <PageSetupDialog editor={editor} onClose={() => setPageSetupOpen(false)} />}
@@ -879,6 +1174,12 @@ function EditorInner({
 				<TablePropertiesDialog editor={editor} onClose={() => setTablePropsOpen(false)} />
 			)}
 			{shortcutsOpen && <KeyboardShortcutsDialog onClose={() => setShortcutsOpen(false)} />}
+			{imagePropsOpen && (
+				<ImagePropertiesDialog editor={editor} onClose={() => setImagePropsOpen(false)} />
+			)}
+			{paragraphPropsOpen && (
+				<ParagraphPropertiesDialog editor={editor} onClose={() => setParagraphPropsOpen(false)} />
+			)}
 		</>
 	);
 }
@@ -893,6 +1194,8 @@ export function JPOfficeEditor({
 	showMenuBar = false,
 	showSidebar = false,
 	title = 'Untitled document',
+	author,
+	remoteCursors,
 	onTitleChange,
 	onMenuAction,
 	onShare,
@@ -980,6 +1283,8 @@ export function JPOfficeEditor({
 						showMenuBar={showMenuBar}
 						showSidebar={showSidebar}
 						title={title}
+						author={author}
+						remoteCursors={remoteCursors}
 						onTitleChange={onTitleChange}
 						onMenuAction={onMenuAction}
 						onShare={onShare}

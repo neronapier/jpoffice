@@ -29,7 +29,7 @@ export function documentToHtml(doc: JPDocument, selection: JPRange): string {
 	if (pathEquals(startPath, endPath)) {
 		const textNode = getNodeAtPath(doc, startPath);
 		if (!textNode || textNode.type !== 'text') return '';
-		const text = (textNode as { text: string }).text.slice(startOffset, endOffset);
+		const text = (textNode as unknown as { text: string }).text.slice(startOffset, endOffset);
 		const runPath = startPath.slice(0, -1);
 		const run = getNodeAtPath(doc, runPath) as JPRun;
 		return wrapTextInRunHtml(escapeHtml(text), run.properties);

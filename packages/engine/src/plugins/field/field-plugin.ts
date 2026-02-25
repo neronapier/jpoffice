@@ -230,4 +230,109 @@ export class FieldPlugin implements JPPlugin {
 			}
 		}
 	}
+
+	/**
+	 * Resolve PAGE and NUMPAGES field values based on actual layout pages.
+	 * Should be called after layout is computed.
+	 * Returns true if any field values changed (requiring re-render).
+	 */
+	resolvePageFields(
+		editor: JPEditor,
+		pages: readonly { readonly blocks: readonly unknown[] }[],
+	): boolean {
+		const doc = editor.getDocument();
+		const totalPages = pages.length;
+		let changed = false;
+
+		// Collect all field nodes and determine which page they are on
+		const fieldLocations = this.collectFieldLocations(doc, [], pages);
+
+		editor.batch(() => {
+			for (const loc of fieldLocations) {
+				let newValue: string | null = null;
+				if (loc.fieldType === 'PAGE') {
+					newValue = String(loc.pageNumber);
+				} else if (loc.fieldType === 'NUMPAGES') {
+					newValue = String(totalPages);
+				}
+				if (newValue !== null && newValue !== loc.cachedResult) {
+					editor.apply({
+						type: 'set_properties',
+						path: loc.path,
+						properties: { cachedResult: newValue },
+						oldProperties: { cachedResult: loc.cachedResult },
+					});
+					changed = true;
+				}
+			}
+		});
+
+		return changed;
+	}
+
+	private collectFieldLocations(
+		node: JPNode,
+		path: number[],
+		pages: readonly { readonly blocks: readonly unknown[] }[],
+	): Array<{
+		path: number[];
+		fieldType: JPFieldType;
+		cachedResult: string;
+		pageNumber: number;
+	}> {
+		const result: Array<{
+			path: number[];
+			fieldType: JPFieldType;
+			cachedResult: string;
+			pageNumber: number;
+		}> = [];
+
+		if (node.type === 'field') {
+			const field = node as JPNode & {
+				fieldType: JPFieldType;
+				cachedResult: string;
+			};
+			if (field.fieldType === 'PAGE' || field.fieldType === 'NUMPAGES') {
+				const pageNum = this.findPageForPath(path, pages);
+				result.push({
+					path: [...path],
+					fieldType: field.fieldType,
+					cachedResult: field.cachedResult,
+					pageNumber: pageNum,
+				});
+			}
+		}
+		if ('children' in node && Array.isArray(node.children)) {
+			for (let i = 0; i < node.children.length; i++) {
+				result.push(...this.collectFieldLocations(node.children[i], [...path, i], pages));
+			}
+		}
+		return result;
+	}
+
+	private findPageForPath(
+		fieldPath: number[],
+		pages: readonly { readonly blocks: readonly unknown[] }[],
+	): number {
+		// Find which page contains a block whose nodePath/path is an ancestor of fieldPath
+		for (let pi = 0; pi < pages.length; pi++) {
+			for (const block of pages[pi].blocks) {
+				const b = block as { nodePath?: JPPath; path?: JPPath };
+				const blockPath = b.nodePath ?? b.path;
+				if (!blockPath) continue;
+				if (isPathPrefix(blockPath as number[], fieldPath)) {
+					return pi + 1;
+				}
+			}
+		}
+		return 1;
+	}
+}
+
+function isPathPrefix(prefix: number[], full: number[]): boolean {
+	if (prefix.length > full.length) return false;
+	for (let i = 0; i < prefix.length; i++) {
+		if (prefix[i] !== full[i]) return false;
+	}
+	return true;
 }

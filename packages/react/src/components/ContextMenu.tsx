@@ -329,18 +329,12 @@ const tableIcons = {
 	insertColRight: cmIcon(
 		'M3 3v18h2V3H3zm16 0v18h2V3h-2zm-4 0v18h2V3h-2zm-8 0v18h2V3H7zm4 9l-4-4v8l4-4z',
 	),
-	deleteRow: cmIcon(
-		'M21 11H3v2h18v-2zm0 4H3v2h18v-2zM3 7h18V5H3v2zm0 14h18v-2H3v2z',
-	),
-	deleteCol: cmIcon(
-		'M11 3v18h2V3h-2zm4 0v18h2V3h-2zM7 3v18H5V3h2zm14 0v18h-2V3h2z',
-	),
+	deleteRow: cmIcon('M21 11H3v2h18v-2zm0 4H3v2h18v-2zM3 7h18V5H3v2zm0 14h18v-2H3v2z'),
+	deleteCol: cmIcon('M11 3v18h2V3h-2zm4 0v18h2V3h-2zM7 3v18H5V3h2zm14 0v18h-2V3h2z'),
 	mergeCells: cmIcon(
 		'M3 3v18h18V3H3zm16 16H5V5h14v14zM7 7h4v4H7V7zm6 0h4v4h-4V7zm-6 6h4v4H7v-4zm6 0h4v4h-4v-4z',
 	),
-	splitCell: cmIcon(
-		'M3 3v18h18V3H3zm8 16H5v-6h6v6zm0-8H5V5h6v6zm8 8h-6v-6h6v6zm0-8h-6V5h6v6z',
-	),
+	splitCell: cmIcon('M3 3v18h18V3H3zm8 16H5v-6h6v6zm0-8H5V5h6v6zm8 8h-6v-6h6v6zm0-8h-6V5h6v6z'),
 	tableProperties: cmIcon(
 		'M20 2H4c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-8 18H4v-6h8v6zm0-8H4V6h8v6zm10 8h-8v-6h8v6zm0-8h-8V6h8v6z',
 	),
@@ -406,6 +400,72 @@ export function getTableContextMenuGroups(): ContextMenuGroup[] {
 					id: 'table.properties',
 					label: 'Propiedades de tabla',
 					icon: tableIcons.tableProperties,
+				},
+			],
+		},
+	];
+}
+
+const imageIcons = {
+	altText: cmIcon(
+		'M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zm-1 7V3.5L18.5 9H13zM6 20V4h5v7h7v9H6z',
+	),
+	wrapText: cmIcon(
+		'M4 19h16v2H4v-2zm5-4h11v2H9v-2zM4 11h16v2H4v-2zM4 3h16v2H4V3zm5 4h11v2H9V7z',
+	),
+	sizePosition: cmIcon(
+		'M21 3H3c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H3V5h18v14zM5 15h14v3H5v-3z',
+	),
+	replaceImage: cmIcon(
+		'M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z',
+	),
+	resetSize: cmIcon(
+		'M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z',
+	),
+};
+
+export function getImageContextMenuGroups(): ContextMenuGroup[] {
+	return [
+		{
+			items: [
+				{
+					id: 'image.altText',
+					label: 'Texto alternativo...',
+					icon: imageIcons.altText,
+				},
+				{
+					id: 'image.wrapText',
+					label: 'Ajuste de texto',
+					icon: imageIcons.wrapText,
+					submenu: true,
+				},
+			],
+		},
+		{
+			items: [
+				{
+					id: 'image.properties',
+					label: 'Tamaño y posición...',
+					icon: imageIcons.sizePosition,
+				},
+				{
+					id: 'image.replace',
+					label: 'Reemplazar imagen...',
+					icon: imageIcons.replaceImage,
+				},
+				{
+					id: 'image.resetSize',
+					label: 'Restablecer tamaño',
+					icon: imageIcons.resetSize,
+				},
+			],
+		},
+		{
+			items: [
+				{
+					id: 'image.delete',
+					label: 'Eliminar imagen',
+					icon: contextMenuIcons.delete,
 				},
 			],
 		},

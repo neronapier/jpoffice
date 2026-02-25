@@ -89,9 +89,7 @@ function extractShapesPerPage(
  * Extract footnotes from the document in order.
  * Returns an array of { number, text } for rendering.
  */
-function extractFootnotes(
-	doc: JPDocument,
-): readonly { number: number; text: string }[] {
+function extractFootnotes(doc: JPDocument): readonly { number: number; text: string }[] {
 	if (!doc.footnotes || doc.footnotes.length === 0) return [];
 
 	const result: { number: number; text: string }[] = [];

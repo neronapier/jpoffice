@@ -102,9 +102,7 @@ export function TableSizePicker({ onSelect, onClose }: TableSizePickerProps) {
 					})}
 				</div>
 				<div style={labelStyle}>
-					{hoveredRow > 0 && hoveredCol > 0
-						? `${hoveredCol} \u00d7 ${hoveredRow}`
-						: 'Insert table'}
+					{hoveredRow > 0 && hoveredCol > 0 ? `${hoveredCol} \u00d7 ${hoveredRow}` : 'Insert table'}
 				</div>
 			</div>
 		</>

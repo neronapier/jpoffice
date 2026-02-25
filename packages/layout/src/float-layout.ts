@@ -3,7 +3,7 @@
  * text wrapping exclusion zones.
  */
 
-import type { JPDrawingProperties, JPWrapping } from '@jpoffice/model';
+import type { JPDrawingProperties, JPPath, JPWrapping } from '@jpoffice/model';
 import { emuToPx } from '@jpoffice/model';
 import type { LayoutRect } from './types';
 
@@ -14,6 +14,7 @@ import type { LayoutRect } from './types';
 export interface FloatingItem {
 	readonly nodeId: string; // JPDrawing.id
 	readonly imageNodeId: string; // JPImage.id
+	readonly imagePath: JPPath; // Path to the JPImage node in the document tree
 	readonly src: string;
 	readonly mimeType: string;
 	readonly widthPx: number;
@@ -25,6 +26,7 @@ export interface FloatingItem {
 export interface PositionedFloat {
 	readonly nodeId: string;
 	readonly imageNodeId: string;
+	readonly imagePath: JPPath;
 	readonly x: number;
 	readonly y: number;
 	readonly width: number;
@@ -96,6 +98,7 @@ export function positionFloats(
 		result.push({
 			nodeId: item.nodeId,
 			imageNodeId: item.imageNodeId,
+			imagePath: item.imagePath,
 			x,
 			y,
 			width: item.widthPx,

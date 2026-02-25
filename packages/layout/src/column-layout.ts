@@ -130,6 +130,12 @@ export function distributeBlocksToColumns(
 		const repositioned = repositionBlock(block, absoluteX, absoluteY, currentColIndex);
 		col.blocks.push(repositioned);
 		cursorY += blockHeight;
+
+		// Explicit column break: advance to next column
+		if (isLayoutParagraph(block) && block.columnBreakAfter) {
+			currentColIndex++;
+			cursorY = 0;
+		}
 	}
 
 	return { columns: filledColumns, overflow };

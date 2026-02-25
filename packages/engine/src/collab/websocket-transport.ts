@@ -24,6 +24,9 @@ export class WebSocketTransport implements CollabTransport {
 	/** Whether the user explicitly called disconnect(). */
 	private intentionalDisconnect = false;
 
+	/** Callback when the offline queue length changes. */
+	onQueueChange?: (length: number) => void;
+
 	/** Maximum number of reconnection attempts before giving up. */
 	readonly maxReconnectAttempts: number;
 
@@ -67,6 +70,7 @@ export class WebSocketTransport implements CollabTransport {
 		} else {
 			// Queue for when we reconnect
 			this.offlineQueue.push(message);
+			this.onQueueChange?.(this.offlineQueue.length);
 		}
 	}
 
@@ -182,6 +186,10 @@ export class WebSocketTransport implements CollabTransport {
 
 		for (const msg of queued) {
 			this.ws.send(JSON.stringify(msg));
+		}
+
+		if (queued.length > 0) {
+			this.onQueueChange?.(0);
 		}
 	}
 

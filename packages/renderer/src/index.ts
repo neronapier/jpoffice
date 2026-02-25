@@ -6,6 +6,8 @@ export type {
 	TableAtCoordsResult,
 	ColumnBorderResult,
 	RowBorderResult,
+	ImageAtCoordsResult,
+	SpellErrorEntry,
 } from './canvas-renderer';
 
 // Sub-renderers
@@ -30,6 +32,9 @@ export { drawSquigglyLine } from './squiggly-renderer';
 // Remote cursors (collaboration)
 export { drawRemoteCursors } from './remote-cursor-renderer';
 export type { RemoteCursorInfo, PositionResolver } from './remote-cursor-renderer';
+
+// Equations
+export { EquationRenderer } from './equation-renderer';
 
 // Shapes
 export { ShapeRenderer, drawShape } from './shape-renderer';

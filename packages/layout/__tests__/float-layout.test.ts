@@ -14,6 +14,7 @@ function makeFloatingItem(overrides: Partial<FloatingItem> = {}): FloatingItem {
 	return {
 		nodeId: 'float-1',
 		imageNodeId: 'img-1',
+		imagePath: [0, 0, 0, 0],
 		src: 'test.png',
 		mimeType: 'image/png',
 		widthPx: 100,
@@ -148,6 +149,7 @@ describe('getLineExclusions', () => {
 		const float: PositionedFloat = {
 			nodeId: 'f1',
 			imageNodeId: 'i1',
+			imagePath: [0],
 			x: 72,
 			y: 200,
 			width: 100,
@@ -167,6 +169,7 @@ describe('getLineExclusions', () => {
 		const float: PositionedFloat = {
 			nodeId: 'f1',
 			imageNodeId: 'i1',
+			imagePath: [0],
 			x: 72,
 			y: 90,
 			width: 100,
@@ -185,6 +188,7 @@ describe('getLineExclusions', () => {
 		const float: PositionedFloat = {
 			nodeId: 'f1',
 			imageNodeId: 'i1',
+			imagePath: [0],
 			x: 400,
 			y: 90,
 			width: 100,
@@ -203,6 +207,7 @@ describe('getLineExclusions', () => {
 		const float: PositionedFloat = {
 			nodeId: 'f1',
 			imageNodeId: 'i1',
+			imagePath: [0],
 			x: 72,
 			y: 90,
 			width: 100,
@@ -229,6 +234,7 @@ describe('isBlockedByFloat', () => {
 		const float: PositionedFloat = {
 			nodeId: 'f1',
 			imageNodeId: 'i1',
+			imagePath: [0],
 			x: 72,
 			y: 90,
 			width: 100,
@@ -246,6 +252,7 @@ describe('isBlockedByFloat', () => {
 		const float: PositionedFloat = {
 			nodeId: 'f1',
 			imageNodeId: 'i1',
+			imagePath: [0],
 			x: 72,
 			y: 90,
 			width: 100,
@@ -264,6 +271,7 @@ describe('isBlockedByFloat', () => {
 		const float: PositionedFloat = {
 			nodeId: 'f1',
 			imageNodeId: 'i1',
+			imagePath: [0],
 			x: 72,
 			y: 90,
 			width: 100,

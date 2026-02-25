@@ -398,6 +398,43 @@ function writeSectionProperties(
 		});
 	}
 
+	// Page borders
+	if (props.pageBorders) {
+		const borders = props.pageBorders;
+		b.open('w:pgBorders', {
+			'w:offsetFrom': borders.offsetFrom,
+			...(borders.display !== 'allPages' ? { 'w:display': borders.display } : {}),
+		});
+		const writeBorderSide = (
+			tag: string,
+			side?: { style: string; color: string; width: number; space: number },
+		) => {
+			if (!side) return;
+			b.empty(`w:${tag}`, {
+				'w:val': side.style,
+				'w:color': side.color,
+				'w:sz': side.width,
+				'w:space': side.space,
+			});
+		};
+		writeBorderSide('top', borders.top);
+		writeBorderSide('left', borders.left);
+		writeBorderSide('bottom', borders.bottom);
+		writeBorderSide('right', borders.right);
+		b.close(); // w:pgBorders
+	}
+
+	// Line numbering
+	if (props.lineNumbering) {
+		const ln = props.lineNumbering;
+		b.empty('w:lnNumType', {
+			'w:start': ln.start,
+			'w:countBy': ln.countBy,
+			'w:restart': ln.restart,
+			'w:distance': ln.distance,
+		});
+	}
+
 	b.close(); // w:sectPr
 }
 

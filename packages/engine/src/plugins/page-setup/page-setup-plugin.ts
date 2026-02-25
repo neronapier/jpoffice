@@ -1,4 +1,11 @@
-import type { JPOrientation, JPSectionColumns, JPSectionProperties } from '@jpoffice/model';
+import type {
+	JPLineNumbering,
+	JPOrientation,
+	JPPageBorders,
+	JPSectionColumns,
+	JPSectionProperties,
+	JPWatermark,
+} from '@jpoffice/model';
 import type { JPEditor } from '../../editor';
 import type { JPPlugin } from '../plugin';
 import { resolveSelectionContext } from '../text/text-utils';
@@ -64,6 +71,18 @@ export interface SetColumnsArgs {
 
 export interface ApplyPresetArgs {
 	preset: PagePresetName;
+}
+
+export interface SetWatermarkArgs {
+	watermark: JPWatermark | null; // null to remove
+}
+
+export interface SetPageBordersArgs {
+	pageBorders: JPPageBorders | null; // null to remove
+}
+
+export interface SetLineNumberingArgs {
+	lineNumbering: JPLineNumbering | null; // null to remove
 }
 
 // ── PageSetupInfo ────────────────────────────────────────────────────
@@ -155,6 +174,30 @@ export class PageSetupPlugin implements JPPlugin {
 				getCurrentSectionPath(editor) !== null &&
 				args?.preset in PAGE_PRESETS,
 			execute: (_ed, args) => this.applyPreset(editor, args),
+		});
+
+		// ── pageSetup.setWatermark ──
+		editor.registerCommand<SetWatermarkArgs>({
+			id: 'pageSetup.setWatermark',
+			name: 'Set Watermark',
+			canExecute: () => !editor.isReadOnly() && getCurrentSectionPath(editor) !== null,
+			execute: (_ed, args) => this.setWatermark(editor, args),
+		});
+
+		// ── pageSetup.setPageBorders ──
+		editor.registerCommand<SetPageBordersArgs>({
+			id: 'pageSetup.setPageBorders',
+			name: 'Set Page Borders',
+			canExecute: () => !editor.isReadOnly() && getCurrentSectionPath(editor) !== null,
+			execute: (_ed, args) => this.setPageBorders(editor, args),
+		});
+
+		// ── pageSetup.setLineNumbering ──
+		editor.registerCommand<SetLineNumberingArgs>({
+			id: 'pageSetup.setLineNumbering',
+			name: 'Set Line Numbering',
+			canExecute: () => !editor.isReadOnly() && getCurrentSectionPath(editor) !== null,
+			execute: (_ed, args) => this.setLineNumbering(editor, args),
 		});
 	}
 
@@ -311,6 +354,51 @@ export class PageSetupPlugin implements JPPlugin {
 			path: sectionPath,
 			properties: { pageSize: newPageSize },
 			oldProperties: { pageSize: oldPageSize },
+		});
+	}
+
+	private setWatermark(editor: JPEditor, args: SetWatermarkArgs): void {
+		const sectionPath = getCurrentSectionPath(editor);
+		if (!sectionPath) return;
+
+		const props = getCurrentSectionProps(editor);
+		if (!props) return;
+
+		editor.apply({
+			type: 'set_properties',
+			path: sectionPath,
+			properties: { watermark: args.watermark ?? null },
+			oldProperties: { watermark: props.watermark ?? null },
+		});
+	}
+
+	private setPageBorders(editor: JPEditor, args: SetPageBordersArgs): void {
+		const sectionPath = getCurrentSectionPath(editor);
+		if (!sectionPath) return;
+
+		const props = getCurrentSectionProps(editor);
+		if (!props) return;
+
+		editor.apply({
+			type: 'set_properties',
+			path: sectionPath,
+			properties: { pageBorders: args.pageBorders ?? null },
+			oldProperties: { pageBorders: props.pageBorders ?? null },
+		});
+	}
+
+	private setLineNumbering(editor: JPEditor, args: SetLineNumberingArgs): void {
+		const sectionPath = getCurrentSectionPath(editor);
+		if (!sectionPath) return;
+
+		const props = getCurrentSectionProps(editor);
+		if (!props) return;
+
+		editor.apply({
+			type: 'set_properties',
+			path: sectionPath,
+			properties: { lineNumbering: args.lineNumbering ?? null },
+			oldProperties: { lineNumbering: props.lineNumbering ?? null },
 		});
 	}
 }

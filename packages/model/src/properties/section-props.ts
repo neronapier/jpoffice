@@ -19,6 +19,38 @@ export interface JPSectionColumns {
 	readonly separator: boolean;
 }
 
+export interface JPWatermark {
+	readonly text: string;
+	readonly fontFamily: string;
+	readonly fontSize: number; // pt
+	readonly color: string;
+	readonly rotation: number; // degrees
+	readonly opacity: number; // 0-1
+}
+
+export interface JPPageBorderSide {
+	readonly style: string; // 'single', 'double', 'dashed', 'dotted', etc.
+	readonly color: string;
+	readonly width: number; // in eighths of a point (OOXML)
+	readonly space: number; // spacing from text/page edge in pt
+}
+
+export interface JPPageBorders {
+	readonly top?: JPPageBorderSide;
+	readonly bottom?: JPPageBorderSide;
+	readonly left?: JPPageBorderSide;
+	readonly right?: JPPageBorderSide;
+	readonly display: 'allPages' | 'firstPage' | 'notFirstPage';
+	readonly offsetFrom: 'page' | 'text';
+}
+
+export interface JPLineNumbering {
+	readonly start: number;
+	readonly countBy: number;
+	readonly restart: 'newPage' | 'newSection' | 'continuous';
+	readonly distance: number; // twips
+}
+
 export interface JPSectionProperties {
 	readonly pageSize: {
 		readonly width: number; // twips (Letter: 12240, A4: 11906)
@@ -37,6 +69,9 @@ export interface JPSectionProperties {
 	readonly columns?: JPSectionColumns;
 	readonly headerReferences?: readonly JPHeaderFooterRef[];
 	readonly footerReferences?: readonly JPHeaderFooterRef[];
+	readonly watermark?: JPWatermark;
+	readonly pageBorders?: JPPageBorders;
+	readonly lineNumbering?: JPLineNumbering;
 }
 
 /**

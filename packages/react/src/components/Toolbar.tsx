@@ -5,6 +5,7 @@ import type { CSSProperties, ReactNode } from 'react';
 import { useCommand } from '../hooks/useCommand';
 import { useEditor } from '../hooks/useEditor';
 import { useEditorState } from '../hooks/useEditorState';
+import { ShapePicker } from './ShapePicker';
 import { TableSizePicker } from './TableSizePicker';
 
 /* ------------------------------------------------------------------ */
@@ -169,6 +170,9 @@ const icons = {
 	),
 	moreVert: icon(
 		'M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z',
+	),
+	shape: icon(
+		'M11.15 3.4L7.43 9.48c-.41.66.07 1.52.85 1.52h7.43c.78 0 1.26-.86.85-1.52L12.85 3.4a.993.993 0 00-1.7 0zM17 14h-4v4h4v-4zM8.5 21a3.5 3.5 0 100-7 3.5 3.5 0 000 7z',
 	),
 };
 
@@ -867,6 +871,7 @@ export function Toolbar({
 	}, [editor]);
 
 	const [tablePickerOpen, setTablePickerOpen] = useState(false);
+	const [shapePickerOpen, setShapePickerOpen] = useState(false);
 	const handleInsertTableFromPicker = useCallback(
 		(rows: number, cols: number) => {
 			setTablePickerOpen(false);
@@ -988,7 +993,13 @@ export function Toolbar({
 				<TBtn
 					title="Spelling and grammar check"
 					ariaLabel="Spelling and grammar check"
-					onClick={() => {}}
+					onClick={() => {
+						try {
+							editor.executeCommand('spellcheck.toggle');
+						} catch {
+							/* not registered */
+						}
+					}}
 				>
 					{icons.spellcheck}
 				</TBtn>
@@ -1145,7 +1156,11 @@ export function Toolbar({
 					{icons.image}
 				</TBtn>
 				<div style={{ position: 'relative', display: 'inline-flex' }}>
-					<TBtn title="Insert table" ariaLabel="Insert table" onClick={() => setTablePickerOpen(!tablePickerOpen)}>
+					<TBtn
+						title="Insert table"
+						ariaLabel="Insert table"
+						onClick={() => setTablePickerOpen(!tablePickerOpen)}
+					>
 						{icons.table}
 					</TBtn>
 					{tablePickerOpen && (
@@ -1153,6 +1168,18 @@ export function Toolbar({
 							onSelect={handleInsertTableFromPicker}
 							onClose={() => setTablePickerOpen(false)}
 						/>
+					)}
+				</div>
+				<div style={{ position: 'relative', display: 'inline-flex' }}>
+					<TBtn
+						title="Insert shape"
+						ariaLabel="Insert shape"
+						onClick={() => setShapePickerOpen(!shapePickerOpen)}
+					>
+						{icons.shape}
+					</TBtn>
+					{shapePickerOpen && (
+						<ShapePicker editor={editor} onClose={() => setShapePickerOpen(false)} />
 					)}
 				</div>
 			</div>

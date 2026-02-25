@@ -199,7 +199,9 @@ export function Ruler({
 			if (!dragTarget) return;
 			try {
 				(e.target as SVGElement).releasePointerCapture?.(e.pointerId);
-			} catch { /* ignore */ }
+			} catch {
+				/* ignore */
+			}
 
 			switch (dragTarget) {
 				case 'marginLeft':
@@ -221,9 +223,17 @@ export function Ruler({
 			setDragTarget(null);
 		},
 		[
-			dragTarget, liveMarginLeft, liveMarginRight, liveIndentLeft,
-			liveIndentRight, liveFirstLine, onMarginLeftChange, onMarginRightChange,
-			onIndentLeftChange, onIndentRightChange, onIndentFirstLineChange,
+			dragTarget,
+			liveMarginLeft,
+			liveMarginRight,
+			liveIndentLeft,
+			liveIndentRight,
+			liveFirstLine,
+			onMarginLeftChange,
+			onMarginRightChange,
+			onIndentLeftChange,
+			onIndentRightChange,
+			onIndentFirstLineChange,
 		],
 	);
 
@@ -287,7 +297,14 @@ export function Ruler({
 				{/* Left margin edge line */}
 				<line x1={mL} y1={0} x2={mL} y2={RULER_HEIGHT} stroke="#bbb" strokeWidth={1} />
 				{/* Right margin edge line */}
-				<line x1={pageWidth - mR} y1={0} x2={pageWidth - mR} y2={RULER_HEIGHT} stroke="#bbb" strokeWidth={1} />
+				<line
+					x1={pageWidth - mR}
+					y1={0}
+					x2={pageWidth - mR}
+					y2={RULER_HEIGHT}
+					stroke="#bbb"
+					strokeWidth={1}
+				/>
 
 				{/* Tick marks */}
 				{marks.map((mark) => (
@@ -322,7 +339,9 @@ export function Ruler({
 						y1={0}
 						x2={guideX}
 						y2={RULER_HEIGHT}
-						stroke={dragTarget === 'marginLeft' || dragTarget === 'marginRight' ? '#e53935' : '#4a90d9'}
+						stroke={
+							dragTarget === 'marginLeft' || dragTarget === 'marginRight' ? '#e53935' : '#4a90d9'
+						}
 						strokeWidth={1}
 						strokeDasharray="2,2"
 						opacity={0.7}

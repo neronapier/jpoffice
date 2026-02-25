@@ -12,6 +12,7 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
+    "@jpoffice/engine": "workspace:*",
     "@jpoffice/model": "workspace:*",
     "ws": "^8.18.0"
   },

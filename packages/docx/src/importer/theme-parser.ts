@@ -74,7 +74,10 @@ export function parseTheme(doc: Document): ThemeColors {
 /**
  * Resolve a theme color reference to an RGB hex string.
  */
-export function resolveThemeColor(themeColor: string, themeColors: ThemeColors): string | undefined {
+export function resolveThemeColor(
+	themeColor: string,
+	themeColors: ThemeColors,
+): string | undefined {
 	const mapping: Record<string, keyof ThemeColors> = {
 		dark1: 'dk1',
 		dark2: 'dk2',

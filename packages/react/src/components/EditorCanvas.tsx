@@ -53,6 +53,8 @@ export interface EditorCanvasProps {
 	onContextMenu?: (e: React.MouseEvent) => void;
 	/** Ref callback to expose the internal CanvasRenderer instance. */
 	rendererRef?: React.MutableRefObject<CanvasRenderer | null>;
+	/** Whether header/footer is currently being edited (to intercept body clicks). */
+	hfEditing?: boolean;
 }
 
 export function EditorCanvas({
@@ -65,6 +67,7 @@ export function EditorCanvas({
 	searchCurrentIndex = -1,
 	onContextMenu,
 	rendererRef: externalRendererRef,
+	hfEditing,
 }: EditorCanvasProps) {
 	const containerRef = useRef<HTMLDivElement>(null);
 	const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -367,8 +370,14 @@ export function EditorCanvas({
 
 			const hitResult = hitTestAt(e.clientX, e.clientY);
 			console.log('[JPOffice:Canvas] mouseDown', {
-				hitResult: hitResult ? { pageIndex: hitResult.pageIndex, path: hitResult.point.path, offset: hitResult.point.offset } : null,
-				hasLayout: !!rendererRef.current?.['layoutResult'],
+				hitResult: hitResult
+					? {
+							pageIndex: hitResult.pageIndex,
+							path: hitResult.point.path,
+							offset: hitResult.point.offset,
+						}
+					: null,
+				hasLayout: !!(rendererRef.current as Record<string, unknown> | null)?.layoutResult,
 			});
 			if (!hitResult?.point) {
 				focusTextarea();
@@ -400,13 +409,68 @@ export function EditorCanvas({
 			}
 
 			if (clicks === 2) {
+				// Double-click in header/footer zone: enter edit mode
+				if (!readOnly && layout) {
+					const renderer = rendererRef.current;
+					if (renderer) {
+						const page = layout.pages[hitResult.pageIndex];
+						if (page) {
+							const rect = canvasRef.current?.getBoundingClientRect();
+							if (rect) {
+								const canvasY = e.clientY - rect.top;
+								const z = zoom / 100;
+								const adjustedY = canvasY / z + renderer.getScrollY() / z;
+								const pageY = renderer.pageRenderer.getPageY(layout.pages, hitResult.pageIndex);
+								const localY = adjustedY - pageY;
+
+								if (localY < page.contentArea.y) {
+									// Clicked in header zone
+									editor.executeCommand('headerFooter.editHeader');
+									focusTextarea();
+									return;
+								}
+								if (localY > page.contentArea.y + page.contentArea.height) {
+									// Clicked in footer zone
+									editor.executeCommand('headerFooter.editFooter');
+									focusTextarea();
+									return;
+								}
+							}
+						}
+					}
+				}
 				// Double-click: select word
 				selectWordAt(hitResult.point);
 				focusTextarea();
 				return;
 			}
 
-			// Single click
+			// Single click: if editing header/footer and clicking in body, exit edit mode
+			if (hfEditing && layout) {
+				const page = layout.pages[hitResult.pageIndex];
+				if (page) {
+					const rect = canvasRef.current?.getBoundingClientRect();
+					if (rect) {
+						const canvasY = e.clientY - rect.top;
+						const z = zoom / 100;
+						const adjustedY = canvasY / z + (rendererRef.current?.getScrollY() ?? 0) / z;
+						const pageY =
+							rendererRef.current?.pageRenderer.getPageY(layout.pages, hitResult.pageIndex) ?? 0;
+						const localY = adjustedY - pageY;
+						const inBody =
+							localY >= page.contentArea.y &&
+							localY <= page.contentArea.y + page.contentArea.height;
+						if (inBody) {
+							try {
+								editor.executeCommand('headerFooter.exitEdit');
+							} catch {
+								/* not editing */
+							}
+						}
+					}
+				}
+			}
+
 			if (e.shiftKey) {
 				// Shift+Click: extend selection from current anchor to new focus
 				const currentSel = editor.getSelection();
@@ -439,7 +503,18 @@ export function EditorCanvas({
 			startDragAutoScroll();
 			focusTextarea();
 		},
-		[editor, hitTestAt, focusTextarea, selectWordAt, selectParagraphAt, startDragAutoScroll],
+		[
+			editor,
+			hitTestAt,
+			focusTextarea,
+			selectWordAt,
+			selectParagraphAt,
+			startDragAutoScroll,
+			layout,
+			zoom,
+			readOnly,
+			hfEditing,
+		],
 	);
 
 	// Global mousemove / mouseup listeners during drag
@@ -536,6 +611,7 @@ export function EditorCanvas({
 				flex: 1,
 				overflow: 'auto',
 				backgroundColor: '#f9fbfd',
+				cursor: 'text',
 			}}
 		>
 			<canvas
@@ -547,7 +623,6 @@ export function EditorCanvas({
 					top: 0,
 					left: 0,
 					display: 'block',
-					cursor: 'text',
 				}}
 			/>
 			{/* Spacer div to provide scrollable height */}

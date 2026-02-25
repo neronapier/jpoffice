@@ -3,7 +3,16 @@
  * These describe positioned boxes ready for rendering.
  */
 
-import type { JPCellBorders, JPPath, JPShading, JPTableBorders, JPWrapping } from '@jpoffice/model';
+import type {
+	JPCellBorders,
+	JPPath,
+	JPShading,
+	JPShapeFill,
+	JPShapeStroke,
+	JPShapeType,
+	JPTableBorders,
+	JPWrapping,
+} from '@jpoffice/model';
 
 // -- Geometry --
 
@@ -36,6 +45,10 @@ export interface ResolvedRunStyle {
 	readonly allCaps: boolean;
 	readonly smallCaps: boolean;
 	readonly letterSpacing: number; // px
+	readonly revision?: {
+		readonly type: 'insertion' | 'deletion' | 'formatChange';
+		readonly color: string;
+	};
 }
 
 // -- Layout tree --
@@ -62,6 +75,7 @@ export interface LayoutLine {
 	readonly fragments: readonly LayoutFragment[];
 	readonly paragraphPath: JPPath;
 	readonly lineIndex: number; // index within the paragraph
+	readonly lineNumber?: number; // global line number for line numbering feature
 }
 
 /**
@@ -74,6 +88,14 @@ export interface LayoutParagraph {
 	readonly nodePath: JPPath;
 	readonly outlineLevel?: number; // 0-5 for H1-H6, used for PDF document outlines
 	readonly columnIndex?: number; // which column this block belongs to (multi-column layout)
+	readonly columnBreakAfter?: boolean; // explicit column break after this paragraph
+}
+
+/**
+ * Line number metadata attached to a laid-out line.
+ */
+export interface LayoutLineNumber {
+	readonly lineNumber: number;
 }
 
 /**
@@ -132,13 +154,34 @@ export interface LayoutImage {
 	readonly nodePath: JPPath;
 	readonly src: string;
 	readonly mimeType?: string;
+	readonly crop?: { top: number; right: number; bottom: number; left: number };
+	readonly rotation?: number; // degrees
+	readonly flipH?: boolean;
+	readonly flipV?: boolean;
+	readonly columnIndex?: number; // which column this block belongs to (multi-column layout)
+}
+
+/**
+ * A laid-out shape.
+ */
+export interface LayoutShape {
+	readonly kind: 'shape';
+	readonly rect: LayoutRect;
+	readonly nodePath: JPPath;
+	readonly shapeType: JPShapeType;
+	readonly fill?: JPShapeFill;
+	readonly stroke?: JPShapeStroke;
+	readonly rotation?: number;
+	readonly text?: string;
+	readonly zIndex?: number;
+	readonly children?: readonly LayoutShape[]; // for shape groups
 	readonly columnIndex?: number; // which column this block belongs to (multi-column layout)
 }
 
 /**
  * Union of block-level layout elements.
  */
-export type LayoutBlock = LayoutParagraph | LayoutTable | LayoutImage;
+export type LayoutBlock = LayoutParagraph | LayoutTable | LayoutImage | LayoutShape;
 
 /**
  * A positioned floating image.
@@ -146,6 +189,7 @@ export type LayoutBlock = LayoutParagraph | LayoutTable | LayoutImage;
 export interface LayoutFloat {
 	readonly nodeId: string;
 	readonly imageNodeId: string;
+	readonly imagePath: JPPath;
 	readonly x: number;
 	readonly y: number;
 	readonly width: number;
@@ -165,6 +209,15 @@ export interface LayoutHeaderFooter {
 }
 
 /**
+ * Laid-out footnote area at the bottom of a page.
+ */
+export interface LayoutFootnoteArea {
+	readonly rect: LayoutRect;
+	readonly blocks: readonly LayoutBlock[];
+	readonly separatorY: number; // Y position of the separator line (page-absolute)
+}
+
+/**
  * Column metadata for a multi-column page.
  */
 export interface LayoutPageColumns {
@@ -177,6 +230,31 @@ export interface LayoutPageColumns {
 /**
  * A laid-out page.
  */
+export interface LayoutWatermark {
+	readonly text: string;
+	readonly fontFamily: string;
+	readonly fontSize: number; // pt
+	readonly color: string;
+	readonly rotation: number; // degrees
+	readonly opacity: number; // 0-1
+}
+
+export interface LayoutPageBorders {
+	readonly top?: { style: string; color: string; width: number; space: number };
+	readonly bottom?: { style: string; color: string; width: number; space: number };
+	readonly left?: { style: string; color: string; width: number; space: number };
+	readonly right?: { style: string; color: string; width: number; space: number };
+	readonly display: 'allPages' | 'firstPage' | 'notFirstPage';
+	readonly offsetFrom: 'page' | 'text';
+}
+
+export interface LayoutLineNumbering {
+	readonly start: number;
+	readonly countBy: number;
+	readonly restart: 'newPage' | 'newSection' | 'continuous';
+	readonly distance: number; // px
+}
+
 export interface LayoutPage {
 	readonly index: number;
 	readonly width: number; // px
@@ -186,7 +264,11 @@ export interface LayoutPage {
 	readonly floats?: readonly LayoutFloat[];
 	readonly header?: LayoutHeaderFooter;
 	readonly footer?: LayoutHeaderFooter;
+	readonly footnoteArea?: LayoutFootnoteArea;
 	readonly columns?: LayoutPageColumns; // present when section has multi-column layout
+	readonly watermark?: LayoutWatermark;
+	readonly pageBorders?: LayoutPageBorders;
+	readonly lineNumbering?: LayoutLineNumbering;
 }
 
 /**
@@ -223,4 +305,8 @@ export function isLayoutTable(block: LayoutBlock): block is LayoutTable {
 
 export function isLayoutImage(block: LayoutBlock): block is LayoutImage {
 	return 'kind' in block && block.kind === 'image';
+}
+
+export function isLayoutShape(block: LayoutBlock): block is LayoutShape {
+	return 'kind' in block && block.kind === 'shape';
 }

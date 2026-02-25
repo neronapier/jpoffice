@@ -685,8 +685,9 @@ export class TablePlugin implements JPPlugin {
 		const row = getNodeAtPath(doc, rowPath);
 		if (row.type !== 'table-row') return;
 
-		const oldHeight = (row as unknown as { properties: { height?: { value: number; rule: string } } })
-			.properties?.height;
+		const oldHeight = (
+			row as unknown as { properties: { height?: { value: number; rule: string } } }
+		).properties?.height;
 
 		editor.apply({
 			type: 'set_properties',

@@ -11,14 +11,20 @@ export type {
 	LayoutImage,
 	LayoutFloat,
 	LayoutBlock,
+	LayoutFootnoteArea,
+	LayoutShape,
 	LayoutHeaderFooter,
 	LayoutPage,
 	LayoutPageColumns,
 	LayoutResult,
+	LayoutWatermark,
+	LayoutPageBorders,
+	LayoutLineNumbering,
+	LayoutLineNumber,
 	FontMetrics,
 	TextMeasurement,
 } from './types';
-export { isLayoutParagraph, isLayoutTable, isLayoutImage } from './types';
+export { isLayoutParagraph, isLayoutTable, isLayoutImage, isLayoutShape } from './types';
 
 // Text measurer
 export { TextMeasurer } from './text-measurer';

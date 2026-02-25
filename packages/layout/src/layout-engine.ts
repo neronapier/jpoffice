@@ -2,15 +2,22 @@ import type {
 	JPBlockNode,
 	JPDocument,
 	JPDrawing,
+	JPEndnoteRef,
+	JPEquation,
+	JPField,
+	JPFootnoteRef,
 	JPHeaderFooterContent,
 	JPHeaderFooterRef,
 	JPHyperlink,
+	JPMention,
 	JPNumberFormat,
 	JPNumberingLevel,
 	JPParagraph,
 	JPPath,
 	JPRun,
 	JPSection,
+	JPShape,
+	JPShapeGroup,
 	JPStyleRegistry,
 	JPTable,
 } from '@jpoffice/model';
@@ -34,13 +41,18 @@ import { layoutTable } from './table-layout';
 import { TextMeasurer } from './text-measurer';
 import type {
 	LayoutBlock,
+	LayoutFootnoteArea,
 	LayoutHeaderFooter,
+	LayoutLineNumbering,
 	LayoutPage,
+	LayoutPageBorders,
 	LayoutPageColumns,
 	LayoutParagraph,
 	LayoutRect,
 	LayoutResult,
+	LayoutShape,
 	LayoutTable,
+	LayoutWatermark,
 } from './types';
 import { isLayoutParagraph, isLayoutTable } from './types';
 
@@ -120,6 +132,22 @@ export class LayoutEngine {
 			return;
 		}
 
+		// Build optional layout metadata from section properties
+		const watermark: LayoutWatermark | undefined = props.watermark
+			? { ...props.watermark }
+			: undefined;
+		const pageBorders: LayoutPageBorders | undefined = props.pageBorders
+			? { ...props.pageBorders }
+			: undefined;
+		const lineNumbering: LayoutLineNumbering | undefined = props.lineNumbering
+			? {
+					start: props.lineNumbering.start,
+					countBy: props.lineNumbering.countBy,
+					restart: props.lineNumbering.restart,
+					distance: twipsToPx(props.lineNumbering.distance),
+				}
+			: undefined;
+
 		const pageWidth = twipsToPx(props.pageSize.width);
 		const pageHeight = twipsToPx(props.pageSize.height);
 		const marginTop = twipsToPx(props.margins.top);
@@ -182,6 +210,14 @@ export class LayoutEngine {
 
 			const positioned = currentPageFloats;
 
+			// Layout footnotes referenced on this page
+			const footnoteArea = this.layoutFootnotesForPage(
+				doc,
+				currentPageBlocks,
+				contentArea,
+				cursorY,
+			);
+
 			const page: LayoutPage = {
 				index: pages.length,
 				width: pageWidth,
@@ -191,6 +227,10 @@ export class LayoutEngine {
 				floats: positioned.length > 0 ? positioned : undefined,
 				header: hf.header,
 				footer: hf.footer,
+				footnoteArea,
+				watermark,
+				pageBorders,
+				lineNumbering,
 			};
 			pages.push(page);
 			currentPageBlocks = [];
@@ -358,6 +398,46 @@ export class LayoutEngine {
 						}
 					}
 				}
+			} else if (block.type === 'shape' || block.type === 'shape-group') {
+				const shape = block as unknown as JPShape | JPShapeGroup;
+				const shapeX = contentArea.x + emuToPx(shape.x);
+				const shapeY = contentArea.y + emuToPx(shape.y);
+				const shapeW = emuToPx(shape.width);
+				const shapeH = emuToPx(shape.height);
+
+				const layoutShape: LayoutShape = {
+					kind: 'shape',
+					rect: { x: shapeX, y: shapeY, width: shapeW, height: shapeH },
+					nodePath: blockPath,
+					shapeType: block.type === 'shape' ? (shape as JPShape).shapeType : 'rectangle',
+					fill: block.type === 'shape' ? (shape as JPShape).fill : undefined,
+					stroke: block.type === 'shape' ? (shape as JPShape).stroke : undefined,
+					rotation: block.type === 'shape' ? (shape as JPShape).rotation : undefined,
+					text: block.type === 'shape' ? (shape as JPShape).text : undefined,
+					zIndex: block.type === 'shape' ? (shape as JPShape).zIndex : undefined,
+					children:
+						block.type === 'shape-group'
+							? ((shape as JPShapeGroup).children as readonly JPShape[]).map((child, ci) => ({
+									kind: 'shape' as const,
+									rect: {
+										x: shapeX + emuToPx(child.x),
+										y: shapeY + emuToPx(child.y),
+										width: emuToPx(child.width),
+										height: emuToPx(child.height),
+									},
+									nodePath: [...blockPath, ci],
+									shapeType: child.shapeType,
+									fill: child.fill,
+									stroke: child.stroke,
+									rotation: child.rotation,
+									text: child.text,
+									zIndex: child.zIndex,
+								}))
+							: undefined,
+				};
+
+				currentPageBlocks.push(layoutShape);
+				// Shapes don't advance cursorY (they are positioned absolutely)
 			} else if (block.type === 'table') {
 				const tableLayout = this.layoutTableBlock(doc, block, blockPath, contentArea, cursorY);
 
@@ -398,6 +478,23 @@ export class LayoutEngine {
 		pages: LayoutPage[],
 	): void {
 		const props = section.properties;
+
+		// Build optional layout metadata from section properties
+		const mcWatermark: LayoutWatermark | undefined = props.watermark
+			? { ...props.watermark }
+			: undefined;
+		const mcPageBorders: LayoutPageBorders | undefined = props.pageBorders
+			? { ...props.pageBorders }
+			: undefined;
+		const mcLineNumbering: LayoutLineNumbering | undefined = props.lineNumbering
+			? {
+					start: props.lineNumbering.start,
+					countBy: props.lineNumbering.countBy,
+					restart: props.lineNumbering.restart,
+					distance: twipsToPx(props.lineNumbering.distance),
+				}
+			: undefined;
+
 		const pageWidth = twipsToPx(props.pageSize.width);
 		const pageHeight = twipsToPx(props.pageSize.height);
 		const marginTop = twipsToPx(props.margins.top);
@@ -487,6 +584,9 @@ export class LayoutEngine {
 				header: hf.header,
 				footer: hf.footer,
 				columns: pageColumnsMetadata,
+				watermark: mcWatermark,
+				pageBorders: mcPageBorders,
+				lineNumbering: mcLineNumbering,
 			};
 			pages.push(page);
 
@@ -566,7 +666,13 @@ export class LayoutEngine {
 					[], // no floats in multi-column for now
 				);
 
-				pendingBlocks.push(layoutResult);
+				// Check if paragraph contains a column-break child
+				const hasColumnBreak = block.children.some((c) => c.type === 'column-break');
+				const finalBlock = hasColumnBreak
+					? { ...layoutResult, columnBreakAfter: true }
+					: layoutResult;
+
+				pendingBlocks.push(finalBlock);
 				virtualCursorY = layoutResult.rect.y + layoutResult.rect.height;
 
 				// Check if we've accumulated enough to fill all columns
@@ -832,7 +938,7 @@ export class LayoutEngine {
 		const contentRight = contentArea.x + contentArea.width - paraLayout.indentRight;
 
 		// Translate float Y coordinates from absolute to block-relative
-		const relativeFloats = pageFloats?.map(f => ({ ...f, y: f.y - startY }));
+		const relativeFloats = pageFloats?.map((f) => ({ ...f, y: f.y - startY }));
 
 		const lines = breakIntoLines(
 			items,
@@ -901,12 +1007,16 @@ export class LayoutEngine {
 
 				case 'drawing': {
 					const drawing = child as JPDrawing;
+					// Guard against malformed drawings with missing children
+					if (!(drawing.children as readonly unknown[])?.length) break;
 					const image = drawing.children[0];
+					if (!image?.properties) break;
 					if (drawing.properties.positioning === 'floating' && drawing.properties.floating) {
 						// Collect for float layout
 						floatingItems.push({
 							nodeId: drawing.id,
 							imageNodeId: image.id,
+							imagePath: [...childPath, 0],
 							src: image.properties.src,
 							mimeType: image.properties.mimeType,
 							widthPx: emuToPx(image.properties.width),
@@ -928,6 +1038,10 @@ export class LayoutEngine {
 								width: widthPx,
 								height: heightPx,
 								nodeId: drawing.id,
+								crop: image.properties.crop,
+								rotation: image.properties.rotation,
+								flipH: image.properties.flipH,
+								flipV: image.properties.flipV,
 							},
 						});
 					}
@@ -971,13 +1085,135 @@ export class LayoutEngine {
 					});
 					break;
 
-				// bookmark-start, bookmark-end, column-break: zero-width, skip
+				case 'field': {
+					const field = child as JPField;
+					const displayText = field.cachedResult || '\u00A0';
+					const baseStyle = resolveRunStyle(styles, paragraph.properties, {});
+					items.push({
+						text: displayText,
+						style: { ...baseStyle, backgroundColor: '#e8eaed' },
+						runPath: childPath,
+						runOffset: 0,
+					});
+					break;
+				}
+
+				case 'footnote-ref': {
+					const fnRef = child as JPFootnoteRef;
+					const fnNum = this.getFootnoteDisplayNumber(_doc, fnRef.footnoteId);
+					const fnStyle = resolveRunStyle(styles, paragraph.properties, {});
+					items.push({
+						text: String(fnNum),
+						style: {
+							...fnStyle,
+							superscript: true,
+							fontSize: fnStyle.fontSize * 0.65,
+							color: '#1a73e8',
+						},
+						runPath: childPath,
+						runOffset: 0,
+					});
+					break;
+				}
+
+				case 'endnote-ref': {
+					const enRef = child as JPEndnoteRef;
+					const enNum = this.getFootnoteDisplayNumber(_doc, enRef.footnoteId, true);
+					const enStyle = resolveRunStyle(styles, paragraph.properties, {});
+					items.push({
+						text: String(enNum),
+						style: {
+							...enStyle,
+							superscript: true,
+							fontSize: enStyle.fontSize * 0.65,
+							color: '#1a73e8',
+						},
+						runPath: childPath,
+						runOffset: 0,
+					});
+					break;
+				}
+
+				case 'mention': {
+					const mention = child as JPMention;
+					const baseStyle = resolveRunStyle(styles, paragraph.properties, {});
+					items.push({
+						text: `@${mention.label}`,
+						style: { ...baseStyle, color: '#1a73e8', backgroundColor: '#e8f0fe' },
+						runPath: childPath,
+						runOffset: 0,
+					});
+					break;
+				}
+
+				case 'equation': {
+					const eq = child as JPEquation;
+					const baseStyle = resolveRunStyle(styles, paragraph.properties, {});
+					const eqText = this.getEquationDisplayText(eq.latex);
+					items.push({
+						text: eqText,
+						style: { ...baseStyle, fontFamily: 'Cambria Math' },
+						runPath: childPath,
+						runOffset: 0,
+					});
+					break;
+				}
+
+				// bookmark-start, bookmark-end, column-break, comment-range: zero-width, skip
 				default:
 					break;
 			}
 		}
 
 		return items;
+	}
+
+	/**
+	 * Convert LaTeX to a simplified display string for measurement.
+	 * Replaces common LaTeX commands with their Unicode equivalents.
+	 */
+	private getEquationDisplayText(latex: string): string {
+		// Map of common LaTeX commands to Unicode display
+		const symbolMap: Record<string, string> = {
+			'\\frac': '/',
+			'\\sqrt': '\u221A',
+			'\\sum': '\u2211',
+			'\\prod': '\u220F',
+			'\\int': '\u222B',
+			'\\infty': '\u221E',
+			'\\alpha': '\u03B1',
+			'\\beta': '\u03B2',
+			'\\gamma': '\u03B3',
+			'\\delta': '\u03B4',
+			'\\pi': '\u03C0',
+			'\\theta': '\u03B8',
+			'\\lambda': '\u03BB',
+			'\\sigma': '\u03C3',
+			'\\pm': '\u00B1',
+			'\\times': '\u00D7',
+			'\\div': '\u00F7',
+			'\\leq': '\u2264',
+			'\\geq': '\u2265',
+			'\\neq': '\u2260',
+			'\\approx': '\u2248',
+			'\\rightarrow': '\u2192',
+			'\\leftarrow': '\u2190',
+			'\\Rightarrow': '\u21D2',
+			'\\partial': '\u2202',
+			'\\nabla': '\u2207',
+			'\\forall': '\u2200',
+			'\\exists': '\u2203',
+			'\\in': '\u2208',
+			'\\cup': '\u222A',
+			'\\cap': '\u2229',
+		};
+		let text = latex;
+		for (const [cmd, sym] of Object.entries(symbolMap)) {
+			text = text.split(cmd).join(sym);
+		}
+		// Remove remaining LaTeX control chars
+		text = text.replace(/[\\{}^_]/g, '');
+		return text || '\u00A0';
 	}
 
 	private collectRunItems(
@@ -1000,6 +1236,200 @@ export class LayoutEngine {
 				});
 			}
 		}
+	}
+
+	/**
+	 * Calculate display number for a footnote/endnote reference by counting
+	 * refs in document order.
+	 */
+	private getFootnoteDisplayNumber(doc: JPDocument, footnoteId: string, isEndnote = false): number {
+		const refs = isEndnote ? (doc.endnotes ?? []) : (doc.footnotes ?? []);
+		for (let i = 0; i < refs.length; i++) {
+			if (refs[i].id === footnoteId) return i + 1;
+		}
+		return 1;
+	}
+
+	/**
+	 * Layout footnotes referenced on the current page.
+	 * Collects footnote-ref IDs from blocks, finds their content in doc.footnotes,
+	 * and lays out the footnote paragraphs at the bottom of the content area.
+	 */
+	private layoutFootnotesForPage(
+		doc: JPDocument,
+		blocks: readonly LayoutBlock[],
+		contentArea: LayoutRect,
+		_cursorY: number,
+	): LayoutFootnoteArea | undefined {
+		if (!doc.footnotes || doc.footnotes.length === 0) return undefined;
+
+		// Collect footnote IDs referenced in this page's blocks
+		// by scanning document nodes under each block's path
+		const referencedIds = new Set<string>();
+		for (const block of blocks) {
+			if (!isLayoutParagraph(block)) continue;
+			const para = this.getNodeAtPath(doc, block.nodePath) as
+				| { type?: string; children?: readonly unknown[] }
+				| undefined;
+			if (!para || para.type !== 'paragraph') continue;
+			for (const child of (para as JPParagraph).children) {
+				if (child.type === 'footnote-ref') {
+					referencedIds.add((child as JPFootnoteRef).footnoteId);
+				}
+				if (child.type === 'run') {
+					// Runs don't contain footnote-refs
+				}
+				if (child.type === 'hyperlink') {
+					for (const hChild of (
+						child as { children: readonly { type: string; footnoteId?: string }[] }
+					).children) {
+						if (hChild.type === 'footnote-ref' && hChild.footnoteId) {
+							referencedIds.add(hChild.footnoteId);
+						}
+					}
+				}
+			}
+		}
+
+		if (referencedIds.size === 0) return undefined;
+
+		// Find footnote bodies in document order
+		const footnotesToLayout = doc.footnotes.filter((fn) => referencedIds.has(fn.id));
+		if (footnotesToLayout.length === 0) return undefined;
+
+		// First pass: compute total footnote height
+		const separatorGap = 8;
+		const separatorHeight = 1;
+		const separatorGapBelow = 4;
+		const footnoteIndent = 20;
+
+		// Pre-layout footnotes to measure total height
+		const preBlocks: Array<{
+			lines: readonly {
+				rect: LayoutRect;
+				baseline: number;
+				fragments: readonly unknown[];
+				paragraphPath: JPPath;
+				lineIndex: number;
+			}[];
+			height: number;
+		}> = [];
+		let totalContentHeight = 0;
+
+		for (let fi = 0; fi < footnotesToLayout.length; fi++) {
+			const fn = footnotesToLayout[fi];
+			const fnNum = this.getFootnoteDisplayNumber(doc, fn.id);
+
+			for (const para of fn.content) {
+				const style = resolveRunStyle(doc.styles, para.properties, {});
+				const smallStyle = { ...style, fontSize: style.fontSize * 0.85 };
+
+				const isFirst = preBlocks.length === fi;
+				const items: InlineItem[] = [];
+				if (isFirst) {
+					items.push({
+						text: `${fnNum}. `,
+						style: { ...smallStyle, superscript: true, fontSize: smallStyle.fontSize * 0.75 },
+						runPath: [],
+						runOffset: 0,
+					});
+				}
+
+				for (const child of para.children) {
+					if (child.type === 'run') {
+						const run = child as JPRun;
+						const runStyle = resolveRunStyle(doc.styles, para.properties, run.properties);
+						const fnRunStyle = { ...runStyle, fontSize: runStyle.fontSize * 0.85 };
+						for (const leaf of run.children) {
+							if (isText(leaf)) {
+								items.push({
+									text: (leaf as unknown as { text: string }).text,
+									style: fnRunStyle,
+									runPath: [],
+									runOffset: 0,
+								});
+							}
+						}
+					}
+				}
+
+				if (items.length === 0) continue;
+
+				const availWidth = contentArea.width - footnoteIndent;
+				const lines = breakIntoLines(items, this.measurer, availWidth, 0, 'left', 1.15, [], 0);
+
+				let h = 0;
+				for (const line of lines) h += line.rect.height;
+				preBlocks.push({ lines, height: h });
+				totalContentHeight += h;
+			}
+		}
+
+		if (preBlocks.length === 0) return undefined;
+
+		const totalFootnoteHeight =
+			separatorGap + separatorHeight + separatorGapBelow + totalContentHeight;
+		const footnoteAreaTop = contentArea.y + contentArea.height - totalFootnoteHeight;
+		const separatorY = footnoteAreaTop + separatorGap;
+		const contentStartY = separatorY + separatorHeight + separatorGapBelow;
+
+		// Second pass: build final blocks with page-absolute coordinates
+		const footnoteBlocks: LayoutBlock[] = [];
+		let blockY = contentStartY;
+
+		for (const pre of preBlocks) {
+			let lineY = 0;
+			const finalLines = pre.lines.map((line, li) => {
+				const finalLine = {
+					...line,
+					rect: {
+						x: footnoteIndent,
+						y: lineY,
+						width: contentArea.width - footnoteIndent,
+						height: line.rect.height,
+					},
+					lineIndex: li,
+				};
+				lineY += line.rect.height;
+				return finalLine;
+			});
+
+			footnoteBlocks.push({
+				rect: {
+					x: contentArea.x,
+					y: blockY,
+					width: contentArea.width,
+					height: pre.height,
+				},
+				lines: finalLines,
+				nodePath: [],
+			} as LayoutParagraph);
+			blockY += pre.height;
+		}
+
+		return {
+			rect: {
+				x: contentArea.x,
+				y: footnoteAreaTop,
+				width: contentArea.width,
+				height: totalFootnoteHeight,
+			},
+			blocks: footnoteBlocks,
+			separatorY,
+		};
+	}
+
+	/**
+	 * Get a node at a given path in the document tree.
+	 */
+	private getNodeAtPath(doc: JPDocument, path: JPPath): unknown {
+		let node: unknown = doc;
+		for (const idx of path) {
+			const n = node as { children?: readonly unknown[] };
+			if (!n.children || idx >= n.children.length) return undefined;
+			node = n.children[idx];
+		}
+		return node;
 	}
 
 	getMeasurer(): TextMeasurer {

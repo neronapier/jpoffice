@@ -377,6 +377,7 @@ describe('breakIntoLines with optimal strategy', () => {
 		const float = {
 			nodeId: 'f1',
 			imageNodeId: 'img1',
+			imagePath: [0],
 			x: 0,
 			y: 0,
 			width: 50,

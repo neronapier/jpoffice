@@ -4,7 +4,10 @@ import type { XmlBuilder } from '../xml/xml-builder';
 
 /** Serialize a JPDrawing to w:drawing XML. Returns the rId used for the image. */
 export function writeDrawing(b: XmlBuilder, drawing: JPDrawing, imageRId: string): void {
+	// Guard against malformed drawings with missing children
+	if (!(drawing.children as readonly unknown[])?.length) return;
 	const image = drawing.children[0];
+	if (!image?.properties) return;
 	const imgProps = image.properties;
 	const drawProps = drawing.properties;
 

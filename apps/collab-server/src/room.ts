@@ -1,4 +1,5 @@
 import type { JPOperation } from '@jpoffice/model';
+import { transformOperationAgainstMany } from './ot-server';
 
 export interface Client {
 	readonly id: string;
@@ -88,27 +89,49 @@ export class Room {
 	applyOps(clientId: string, clientVersion: number, ops: JPOperation[]): boolean {
 		if (clientVersion > this.version) return false;
 
-		// In a full implementation, we would collect concurrent ops:
-		//   const concurrentOps = this.opLog
-		//     .filter(e => e.version >= clientVersion && e.clientId !== clientId)
-		//     .flatMap(e => e.ops);
-		// ...and transform ops against them using transformOperationAgainstMany.
-		// For now, we accept and broadcast (last-writer-wins for concurrent edits).
+		// Collect concurrent ops since the client's version
+		const concurrentOps = this.opLog
+			.filter((e) => e.version > clientVersion && e.clientId !== clientId)
+			.flatMap((e) => e.ops);
+
+		// Transform incoming ops against concurrent ops
+		let transformedOps = ops;
+		if (concurrentOps.length > 0) {
+			transformedOps = ops.map((op) => transformOperationAgainstMany(op, concurrentOps));
+		}
+
 		this.version++;
-		this.opLog.push({ version: this.version, clientId, ops });
+		this.opLog.push({ version: this.version, clientId, ops: transformedOps });
 
 		// Trim old ops (keep last 500)
 		if (this.opLog.length > 1000) {
 			this.opLog = this.opLog.slice(-500);
 		}
 
-		// Broadcast to all clients (including sender for ack)
-		this.broadcast(
+		// Send ack to sender
+		const sender = this.clients.get(clientId);
+		if (sender) {
+			try {
+				sender.send(
+					JSON.stringify({
+						type: 'ack',
+						version: this.version,
+						clientId,
+					}),
+				);
+			} catch {
+				/* client disconnected */
+			}
+		}
+
+		// Broadcast transformed ops to other clients
+		this.broadcastExcept(
+			clientId,
 			JSON.stringify({
-				type: 'ops',
+				type: 'remote-op',
 				version: this.version,
 				clientId,
-				ops,
+				payload: transformedOps,
 			}),
 		);
 
@@ -136,16 +159,6 @@ export class Room {
 				state: updated,
 			}),
 		);
-	}
-
-	private broadcast(data: string): void {
-		for (const client of this.clients.values()) {
-			try {
-				client.send(data);
-			} catch {
-				/* client disconnected */
-			}
-		}
 	}
 
 	private broadcastExcept(excludeId: string, data: string): void {

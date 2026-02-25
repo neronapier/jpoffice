@@ -15,6 +15,10 @@ export interface InlineImage {
 	readonly width: number; // px
 	readonly height: number; // px
 	readonly nodeId: string;
+	readonly crop?: { top: number; right: number; bottom: number; left: number };
+	readonly rotation?: number;
+	readonly flipH?: boolean;
+	readonly flipV?: boolean;
 }
 
 export interface InlineItem {
@@ -495,8 +499,19 @@ export function findHyphenationPoints(word: string): number[] {
 
 	// Common suffixes: break before suffix
 	const suffixes = [
-		'tion', 'sion', 'ment', 'ness', 'able', 'ible',
-		'ing', 'ous', 'ful', 'less', 'ive', 'ize', 'ise',
+		'tion',
+		'sion',
+		'ment',
+		'ness',
+		'able',
+		'ible',
+		'ing',
+		'ous',
+		'ful',
+		'less',
+		'ive',
+		'ize',
+		'ise',
 	];
 	for (const suffix of suffixes) {
 		if (lower.endsWith(suffix) && lower.length > suffix.length + MIN_FRAGMENT) {
@@ -808,7 +823,7 @@ function tryHyphenateWord(
 	// Try hyphenation points from largest to smallest to get the longest possible first part
 	for (let i = hyphenPoints.length - 1; i >= 0; i--) {
 		const splitIdx = hyphenPoints[i];
-		const firstPart = word.text.slice(0, splitIdx) + '-';
+		const firstPart = `${word.text.slice(0, splitIdx)}-`;
 		const firstWidth = measurer.measureWord(firstPart, word.style);
 
 		if (firstWidth <= availableWidth) {

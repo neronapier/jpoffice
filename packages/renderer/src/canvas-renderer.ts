@@ -1,17 +1,40 @@
-import type { LayoutBlock, LayoutPage, LayoutResult, LayoutTable } from '@jpoffice/layout';
-import { isLayoutImage, isLayoutParagraph, isLayoutTable } from '@jpoffice/layout';
+import type {
+	LayoutBlock,
+	LayoutImage,
+	LayoutPage,
+	LayoutParagraph,
+	LayoutResult,
+	LayoutShape,
+	LayoutTable,
+} from '@jpoffice/layout';
+import { isLayoutImage, isLayoutParagraph, isLayoutShape, isLayoutTable } from '@jpoffice/layout';
 import type { JPSelection } from '@jpoffice/model';
+import type { JPPath } from '@jpoffice/model';
 import { CursorRenderer } from './cursor-renderer';
 import type { CursorStyle } from './cursor-renderer';
+import { EquationRenderer } from './equation-renderer';
 import { HitTester } from './hit-test';
 import type { HitTestResult } from './hit-test';
 import { ImageRenderer } from './image-renderer';
 import { PageRenderer } from './page-renderer';
 import type { PageChromeOptions } from './page-renderer';
+import { drawRemoteCursors } from './remote-cursor-renderer';
+import type { RemoteCursorInfo } from './remote-cursor-renderer';
 import { SelectionRenderer } from './selection-renderer';
 import type { SearchHighlight, SelectionStyle } from './selection-renderer';
+import { ShapeRenderer } from './shape-renderer';
+import { drawSquigglyLine } from './squiggly-renderer';
 import { TableRenderer } from './table-renderer';
 import { TextRenderer } from './text-renderer';
+
+/**
+ * Spell error entry for squiggly-line rendering.
+ */
+export interface SpellErrorEntry {
+	readonly path: JPPath;
+	readonly offset: number;
+	readonly length: number;
+}
 
 /**
  * Result of findTableAtCanvasCoords().
@@ -46,6 +69,16 @@ export interface RowBorderResult {
 	rowIndex: number;
 	borderY: number;
 	borderVirtualY: number;
+	pageIndex: number;
+	pageVirtualX: number;
+	pageVirtualY: number;
+}
+
+/**
+ * Result of findImageAtCanvasCoords().
+ */
+export interface ImageAtCoordsResult {
+	image: LayoutImage;
 	pageIndex: number;
 	pageVirtualX: number;
 	pageVirtualY: number;
@@ -88,6 +121,8 @@ export class CanvasRenderer {
 	readonly imageRenderer: ImageRenderer;
 	readonly selectionRenderer: SelectionRenderer;
 	readonly cursorRenderer: CursorRenderer;
+	readonly shapeRenderer: ShapeRenderer;
+	readonly equationRenderer: EquationRenderer;
 	readonly hitTester: HitTester;
 
 	private layoutResult: LayoutResult | null = null;
@@ -96,6 +131,9 @@ export class CanvasRenderer {
 	private zoom = 1.0;
 	private searchHighlights: readonly SearchHighlight[] = [];
 	private searchCurrentIndex = -1;
+	private spellErrors: SpellErrorEntry[] = [];
+	private remoteCursors: readonly RemoteCursorInfo[] = [];
+	private hfEditing: { zone: 'header' | 'footer' } | null = null;
 
 	constructor(options?: CanvasRendererOptions) {
 		this.dpr = options?.dpr ?? (typeof window !== 'undefined' ? window.devicePixelRatio : 1);
@@ -107,6 +145,8 @@ export class CanvasRenderer {
 		this.imageRenderer = new ImageRenderer();
 		this.selectionRenderer = new SelectionRenderer(options?.selection);
 		this.cursorRenderer = new CursorRenderer(options?.cursor);
+		this.shapeRenderer = new ShapeRenderer();
+		this.equationRenderer = new EquationRenderer();
 		this.hitTester = new HitTester(this.pageRenderer);
 	}
 
@@ -149,11 +189,45 @@ export class CanvasRenderer {
 	}
 
 	/**
+	 * Get the current scroll Y offset.
+	 */
+	getScrollY(): number {
+		return this.scrollY;
+	}
+
+	/**
 	 * Set search highlights.
 	 */
 	setSearchHighlights(highlights: readonly SearchHighlight[], currentIndex: number): void {
 		this.searchHighlights = highlights;
 		this.searchCurrentIndex = currentIndex;
+	}
+
+	/**
+	 * Set spell check errors for squiggly-line rendering.
+	 */
+	setSpellErrors(errors: ReadonlyMap<string, readonly SpellErrorEntry[]>): void {
+		const flat: SpellErrorEntry[] = [];
+		for (const entries of errors.values()) {
+			for (const e of entries) {
+				flat.push(e);
+			}
+		}
+		this.spellErrors = flat;
+	}
+
+	/**
+	 * Set remote cursors for collaboration rendering.
+	 */
+	setRemoteCursors(cursors: readonly RemoteCursorInfo[]): void {
+		this.remoteCursors = cursors;
+	}
+
+	/**
+	 * Set header/footer editing mode for dimming overlay.
+	 */
+	setHeaderFooterEditing(editing: { zone: 'header' | 'footer' } | null): void {
+		this.hfEditing = editing;
 	}
 
 	/**
@@ -230,6 +304,12 @@ export class CanvasRenderer {
 			// Page chrome (background, shadow)
 			this.pageRenderer.renderPageChrome(ctx, page, pageX, pageY);
 
+			// Watermark (behind all content)
+			this.pageRenderer.renderWatermark(ctx, page, pageX, pageY);
+
+			// Page borders
+			this.pageRenderer.renderPageBorders(ctx, page, pageX, pageY, pi);
+
 			if (this.showMargins) {
 				this.pageRenderer.renderMargins(ctx, page, pageX, pageY);
 			}
@@ -273,6 +353,11 @@ export class CanvasRenderer {
 			// Render blocks (with block-level viewport culling)
 			this.renderPageBlocks(ctx, page, pageX, pageY, cssHeight);
 
+			// Render line numbers in left margin
+			if (page.lineNumbering) {
+				this.renderLineNumbers(ctx, page, pageX, pageY);
+			}
+
 			// Render in-front-of-text floats (after blocks)
 			if (page.floats) {
 				for (const float of page.floats) {
@@ -294,6 +379,25 @@ export class CanvasRenderer {
 				}
 			}
 
+			// Render footnote area
+			if (page.footnoteArea) {
+				const fnArea = page.footnoteArea;
+				// Separator line (1/3 of content width)
+				ctx.save();
+				ctx.strokeStyle = '#9e9e9e';
+				ctx.lineWidth = 0.5;
+				ctx.beginPath();
+				const sepX = pageX + page.contentArea.x;
+				const sepY = pageY + fnArea.separatorY;
+				ctx.moveTo(sepX, sepY);
+				ctx.lineTo(sepX + page.contentArea.width / 3, sepY);
+				ctx.stroke();
+				ctx.restore();
+
+				// Render footnote blocks
+				this.renderHeaderFooterBlocks(ctx, fnArea.blocks, pageX, pageY);
+			}
+
 			// Render footer
 			if (page.footer) {
 				this.renderHeaderFooterBlocks(
@@ -302,6 +406,36 @@ export class CanvasRenderer {
 					pageX + page.contentArea.x,
 					pageY + page.footer.rect.y,
 				);
+			}
+
+			// Header/footer editing dimming overlay
+			if (this.hfEditing) {
+				ctx.save();
+				ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
+				// Dim body content area
+				ctx.fillRect(
+					pageX + page.contentArea.x,
+					pageY + page.contentArea.y,
+					page.contentArea.width,
+					page.contentArea.height,
+				);
+				// Dim the opposite zone
+				if (this.hfEditing.zone === 'header' && page.footer) {
+					ctx.fillRect(
+						pageX + page.contentArea.x,
+						pageY + page.footer.rect.y,
+						page.contentArea.width,
+						page.footer.rect.height,
+					);
+				} else if (this.hfEditing.zone === 'footer' && page.header) {
+					ctx.fillRect(
+						pageX + page.contentArea.x,
+						pageY + page.header.rect.y,
+						page.contentArea.width,
+						page.header.rect.height,
+					);
+				}
+				ctx.restore();
 			}
 
 			// Search highlights (before selection so selection draws on top)
@@ -318,21 +452,21 @@ export class CanvasRenderer {
 
 			// Selection highlight
 			if (this.currentSelection) {
-				this.selectionRenderer.renderSelection(
-					ctx,
-					page,
-					this.currentSelection,
-					pageX,
-					pageY,
-				);
+				this.selectionRenderer.renderSelection(ctx, page, this.currentSelection, pageX, pageY);
 			}
 
 			// Cursor
 			if (this.currentSelection) {
-				this.cursorRenderer.renderCursor(
+				this.cursorRenderer.renderCursor(ctx, page, this.currentSelection.focus, pageX, pageY);
+			}
+
+			// Remote cursors (collaboration)
+			if (this.remoteCursors.length > 0) {
+				drawRemoteCursors(
 					ctx,
 					page,
-					this.currentSelection.focus,
+					this.remoteCursors,
+					(pg, point, px, py) => this.cursorRenderer.findCursorPosition(pg, point, px, py),
 					pageX,
 					pageY,
 				);
@@ -361,10 +495,42 @@ export class CanvasRenderer {
 				for (const line of block.lines) {
 					this.textRenderer.renderLine(ctx, line, contentX + block.rect.x, contentY + block.rect.y);
 				}
+				// Spell check squiggly lines
+				if (this.spellErrors.length > 0) {
+					this.renderSpellErrors(ctx, block, contentX, contentY);
+				}
 			} else if (isLayoutTable(block)) {
 				this.tableRenderer.renderTable(ctx, block, contentX, contentY);
 			} else if (isLayoutImage(block)) {
 				this.imageRenderer.renderImage(ctx, block, contentX, contentY, () => this.render());
+			} else if (isLayoutShape(block)) {
+				this.renderShape(ctx, block, contentX, contentY);
+			}
+		}
+	}
+
+	private renderShape(
+		ctx: CanvasRenderingContext2D,
+		shape: LayoutShape,
+		offsetX: number,
+		offsetY: number,
+	): void {
+		this.shapeRenderer.drawShape(
+			ctx,
+			shape.shapeType,
+			offsetX + shape.rect.x,
+			offsetY + shape.rect.y,
+			shape.rect.width,
+			shape.rect.height,
+			shape.fill,
+			shape.stroke,
+			shape.rotation,
+			shape.text,
+		);
+		// Render children (for shape groups)
+		if (shape.children) {
+			for (const child of shape.children) {
+				this.renderShape(ctx, child, offsetX, offsetY);
 			}
 		}
 	}
@@ -382,6 +548,92 @@ export class CanvasRenderer {
 				}
 			} else if (isLayoutTable(block)) {
 				this.tableRenderer.renderTable(ctx, block, offsetX, offsetY);
+			}
+		}
+	}
+
+	/**
+	 * Render line numbers in the left margin of a page.
+	 */
+	private renderLineNumbers(
+		ctx: CanvasRenderingContext2D,
+		page: LayoutPage,
+		pageX: number,
+		pageY: number,
+	): void {
+		const ln = page.lineNumbering;
+		if (!ln) return;
+
+		let lineNum = ln.start;
+		ctx.save();
+		ctx.fillStyle = '#888888';
+		ctx.font = '9px "Calibri", sans-serif';
+		ctx.textAlign = 'right';
+		ctx.textBaseline = 'alphabetic';
+
+		const numberX = pageX + page.contentArea.x - ln.distance;
+
+		for (const block of page.blocks) {
+			if (!isLayoutParagraph(block)) {
+				continue;
+			}
+			for (const line of block.lines) {
+				if (lineNum % ln.countBy === 0) {
+					const y = pageY + block.rect.y + line.rect.y + line.baseline;
+					ctx.fillText(String(lineNum), numberX, y);
+				}
+				lineNum++;
+			}
+		}
+
+		ctx.restore();
+	}
+
+	/**
+	 * Render squiggly underlines for spell errors within a paragraph block.
+	 */
+	private renderSpellErrors(
+		ctx: CanvasRenderingContext2D,
+		block: LayoutParagraph,
+		offsetX: number,
+		offsetY: number,
+	): void {
+		for (const err of this.spellErrors) {
+			// Check each line/fragment for overlap with the error's path/offset range
+			for (const line of block.lines) {
+				for (const fragment of line.fragments) {
+					if (!pathEquals(fragment.runPath, err.path)) continue;
+
+					const fragStart = fragment.runOffset;
+					const fragEnd = fragStart + fragment.charCount;
+					const errStart = err.offset;
+					const errEnd = err.offset + err.length;
+
+					// Check overlap
+					const overlapStart = Math.max(fragStart, errStart);
+					const overlapEnd = Math.min(fragEnd, errEnd);
+					if (overlapStart >= overlapEnd) continue;
+
+					// Calculate X position within the fragment
+					const textBefore = fragment.text.substring(0, overlapStart - fragStart);
+					const textError = fragment.text.substring(
+						overlapStart - fragStart,
+						overlapEnd - fragStart,
+					);
+
+					ctx.save();
+					ctx.font = TextRenderer.buildFont(fragment.style);
+					const xStart =
+						offsetX +
+						block.rect.x +
+						fragment.rect.x +
+						(textBefore.length > 0 ? ctx.measureText(textBefore).width : 0);
+					const errorWidth = ctx.measureText(textError).width;
+					ctx.restore();
+
+					const squigglyY = offsetY + block.rect.y + line.rect.y + line.baseline + 3;
+					drawSquigglyLine(ctx, xStart, squigglyY, errorWidth, '#D32F2F');
+				}
 			}
 		}
 	}
@@ -513,6 +765,13 @@ export class CanvasRenderer {
 	}
 
 	/**
+	 * Get the device pixel ratio.
+	 */
+	getDpr(): number {
+		return this.dpr;
+	}
+
+	/**
 	 * Expose the canvas element for coordinate transforms in overlays.
 	 */
 	getCanvas(): HTMLCanvasElement | null {
@@ -598,20 +857,38 @@ export class CanvasRenderer {
 		const { vx } = this.canvasToVirtualCoords(canvasX, canvasY);
 		const vThreshold = threshold / this.zoom;
 
-		// Check column right-edges using cells from first row
+		// Collect all unique column border X positions from ALL rows
+		// (handles merged cells where first row may lack intermediate borders)
 		if (table.rows.length === 0) return null;
-		const firstRow = table.rows[0];
 
-		for (let ci = 0; ci < firstRow.cells.length; ci++) {
-			const cell = firstRow.cells[ci];
-			const cellRight = pageVirtualX + table.x + cell.x + cell.width;
+		const borderXSet = new Set<number>();
+		for (const row of table.rows) {
+			// Left edge of first cell
+			if (row.cells.length > 0) {
+				borderXSet.add(pageVirtualX + table.x + row.cells[0].x);
+			}
+			for (const cell of row.cells) {
+				borderXSet.add(pageVirtualX + table.x + cell.x + cell.width);
+			}
+		}
 
-			if (Math.abs(vx - cellRight) <= vThreshold) {
+		for (const borderX of borderXSet) {
+			if (Math.abs(vx - borderX) <= vThreshold) {
+				// Find the column index this corresponds to (using first row as reference)
+				const firstRow = table.rows[0];
+				let colIdx = firstRow.cells.length - 1;
+				for (let ci = 0; ci < firstRow.cells.length; ci++) {
+					const cRight = pageVirtualX + table.x + firstRow.cells[ci].x + firstRow.cells[ci].width;
+					if (Math.abs(borderX - cRight) < 1) {
+						colIdx = ci;
+						break;
+					}
+				}
 				return {
 					table,
-					columnIndex: ci,
-					borderX: (cellRight - pageVirtualX) * this.zoom, // relative to page in canvas px (not used directly)
-					borderVirtualX: cellRight,
+					columnIndex: colIdx,
+					borderX: (borderX - pageVirtualX) * this.zoom,
+					borderVirtualX: borderX,
 					pageIndex: tableResult.pageIndex,
 					pageVirtualX,
 					pageVirtualY,
@@ -626,17 +903,29 @@ export class CanvasRenderer {
 	 * Find a row border near the given canvas-relative coords.
 	 * threshold is in CSS pixels.
 	 */
-	findRowBorderAtCoords(
-		canvasX: number,
-		canvasY: number,
-		threshold = 4,
-	): RowBorderResult | null {
+	findRowBorderAtCoords(canvasX: number, canvasY: number, threshold = 4): RowBorderResult | null {
 		const tableResult = this.findTableAtCanvasCoords(canvasX, canvasY);
 		if (!tableResult) return null;
 
 		const { table, pageVirtualX, pageVirtualY } = tableResult;
 		const { vy } = this.canvasToVirtualCoords(canvasX, canvasY);
 		const vThreshold = threshold / this.zoom;
+
+		// Also detect top border of first row
+		if (table.rows.length > 0) {
+			const topBorder = pageVirtualY + table.y + table.rows[0].y;
+			if (Math.abs(vy - topBorder) <= vThreshold) {
+				return {
+					table,
+					rowIndex: -1,
+					borderY: topBorder,
+					borderVirtualY: topBorder,
+					pageIndex: tableResult.pageIndex,
+					pageVirtualX,
+					pageVirtualY,
+				};
+			}
+		}
 
 		for (let ri = 0; ri < table.rows.length; ri++) {
 			const row = table.rows[ri];
@@ -659,6 +948,58 @@ export class CanvasRenderer {
 	}
 
 	/**
+	 * Find an image at the given canvas-relative CSS pixel coordinates.
+	 * Checks both block-level images and floating images.
+	 */
+	findImageAtCanvasCoords(canvasX: number, canvasY: number): ImageAtCoordsResult | null {
+		if (!this.layoutResult || !this.canvas) return null;
+
+		const { vx, vy } = this.canvasToVirtualCoords(canvasX, canvasY);
+		const cssWidth = this.canvas.width / (this.dpr * this.zoom);
+		const pages = this.layoutResult.pages;
+
+		for (let pi = 0; pi < pages.length; pi++) {
+			const page = pages[pi];
+			const pageY = this.pageRenderer.getPageY(pages, pi);
+			const pageX = (cssWidth - page.width) / 2;
+
+			if (vx < pageX || vx > pageX + page.width) continue;
+			if (vy < pageY || vy > pageY + page.height) continue;
+
+			// Check block-level images (reverse order = top first)
+			for (let bi = page.blocks.length - 1; bi >= 0; bi--) {
+				const block = page.blocks[bi];
+				if (!isLayoutImage(block)) continue;
+				const ix = pageX + block.rect.x;
+				const iy = pageY + block.rect.y;
+				if (vx >= ix && vx <= ix + block.rect.width && vy >= iy && vy <= iy + block.rect.height) {
+					return { image: block, pageIndex: pi, pageVirtualX: pageX, pageVirtualY: pageY };
+				}
+			}
+
+			// Check floating images
+			if (page.floats) {
+				for (let fi = page.floats.length - 1; fi >= 0; fi--) {
+					const float = page.floats[fi];
+					const fx = pageX + float.x;
+					const fy = pageY + float.y;
+					if (vx >= fx && vx <= fx + float.width && vy >= fy && vy <= fy + float.height) {
+						const asImage: LayoutImage = {
+							kind: 'image',
+							rect: { x: float.x, y: float.y, width: float.width, height: float.height },
+							nodePath: float.imagePath,
+							src: float.src,
+							mimeType: float.mimeType,
+						};
+						return { image: asImage, pageIndex: pi, pageVirtualX: pageX, pageVirtualY: pageY };
+					}
+				}
+			}
+		}
+		return null;
+	}
+
+	/**
 	 * Convert virtual doc coords to canvas CSS pixel coords (for overlay positioning).
 	 */
 	virtualToCanvas(virtualX: number, virtualY: number): { cx: number; cy: number } {
@@ -674,4 +1015,13 @@ export class CanvasRenderer {
 		this.imageRenderer.clearCache();
 		this.detach();
 	}
+}
+
+/** Compare two JPPath arrays for equality. */
+function pathEquals(a: JPPath, b: JPPath): boolean {
+	if (a.length !== b.length) return false;
+	for (let i = 0; i < a.length; i++) {
+		if (a[i] !== b[i]) return false;
+	}
+	return true;
 }

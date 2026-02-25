@@ -6,6 +6,7 @@ import {
 	createText,
 	generateId,
 	getNodeAtPath,
+	isDrawing,
 	isImage,
 } from '@jpoffice/model';
 import type { JPDrawingProperties } from '@jpoffice/model';
@@ -73,6 +74,10 @@ export interface ReplaceImageArgs {
 
 export interface ResetImageSizeArgs {
 	path: JPPath; // path to the JPImage node
+}
+
+export interface DeleteImageArgs {
+	path: JPPath; // path to the JPImage node (or its parent drawing)
 }
 
 /**
@@ -145,6 +150,13 @@ export class ImagePlugin implements JPPlugin {
 			name: 'Reset Image Size',
 			canExecute: (_ed, args) => this.canEditImage(editor, args.path),
 			execute: (_ed, args) => this.resetSize(editor, args),
+		});
+
+		editor.registerCommand<DeleteImageArgs>({
+			id: 'image.delete',
+			name: 'Delete Image',
+			canExecute: (_ed, args) => this.canDeleteImage(editor, args.path),
+			execute: (_ed, args) => this.deleteImage(editor, args),
 		});
 	}
 
@@ -428,6 +440,64 @@ export class ImagePlugin implements JPPlugin {
 			path: args.path,
 			properties: { width: origW, height: origH, crop: null },
 			oldProperties,
+		});
+	}
+
+	/**
+	 * Check if the given path points to an image (or its parent drawing) that can be deleted.
+	 */
+	private canDeleteImage(editor: JPEditor, path: JPPath): boolean {
+		if (editor.isReadOnly()) return false;
+		try {
+			const node = getNodeAtPath(editor.getDocument(), path);
+			if (isImage(node)) return true;
+			if (isDrawing(node)) return true;
+			return false;
+		} catch {
+			return false;
+		}
+	}
+
+	/**
+	 * Delete an image by removing its parent drawing node.
+	 * If path points to the image, remove the parent drawing.
+	 * If path points to the drawing, remove the drawing directly.
+	 */
+	private deleteImage(editor: JPEditor, args: DeleteImageArgs): void {
+		const doc = editor.getDocument();
+		const node = getNodeAtPath(doc, args.path);
+
+		let removePath: JPPath;
+		if (isImage(node)) {
+			// Path points to image — remove parent drawing
+			removePath = args.path.slice(0, -1);
+		} else if (isDrawing(node)) {
+			removePath = args.path;
+		} else {
+			return;
+		}
+
+		const parentPath = removePath.slice(0, -1);
+		const removeNode = getNodeAtPath(doc, removePath);
+
+		editor.batch(() => {
+			editor.apply({
+				type: 'remove_node',
+				path: removePath,
+				node: removeNode,
+			});
+
+			// Place cursor at the start of the paragraph containing the deleted drawing
+			const parent = getNodeAtPath(editor.getDocument(), parentPath);
+			if ('children' in parent && (parent.children as readonly unknown[]).length > 0) {
+				// Find first text node in the paragraph for cursor placement
+				const firstChild = (parent.children as readonly { type: string }[])[0];
+				if (firstChild?.type === 'run') {
+					const textPath: JPPath = [...parentPath, 0, 0];
+					const point = { path: textPath, offset: 0 };
+					editor.setSelection({ anchor: point, focus: point });
+				}
+			}
 		});
 	}
 }
